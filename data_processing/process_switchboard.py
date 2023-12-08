@@ -59,6 +59,40 @@ def xml2df(
         
     return pd.DataFrame(data_list)
 
+
+def parse_pointer(pointer_string):
+    
+    filename, pointer = pointer_string.split('#')
+    
+    if '..' in pointer:
+        pointer_start, pointer_end = pointer.split('..')
+    else:
+        pointer_start = pointer
+        pointer_end = pointer
+    
+    return filename, pointer_start.replace('id(', '')[:-1], pointer_end.replace('id(', '')[:-1]
+
+
+def get_pointer_start_end_seconds(pointer_string, source_csv):
+    
+    _, start_id, end_id = parse_pointer(pointer_string)
+    
+    start = source_csv.loc[source_csv['id'] == start_id]['start'].item()
+    end = source_csv.loc[source_csv['id'] == end_id]['end'].item()
+    
+    return start, end
+
+
+def get_syllable_timestamps(df, file_id):
+    #try: 
+    phones = pd.read_csv(f'corpora/nxt_switchboard_ann/csv/phones/{file_id}.csv')
+    #except pd.errors.EmptyDataError:
+    #    print(file_id)
+    df['start'] = df.apply(lambda x: get_pointer_start_end_seconds(x['href'], phones)[0], axis=1)
+    df['end'] = df.apply(lambda x: get_pointer_start_end_seconds(x['href'], phones)[1], axis=1)
+    
+    return df
+   
     
 def xml2raw_csv(
     xml_dir, save_dir,
@@ -75,33 +109,39 @@ def xml2raw_csv(
         for file in tqdm(list(directory.glob('*.xml'))):
             save_stem = ''.join(file.name.split('.')[:2])
             root = get_root(file)
-            #if save_stem in accent_file_ids:
-            data_list = list()
-            for elem in root:
-                if elem.tag == tag_mapping[feat][0]:
-                    data_list.append(elem.attrib)
-                for child in elem:
-                    tag = child.tag.replace('{http://nite.sourceforge.net/}', '')
-                    if tag == tag_mapping[feat][-1]:
-                        #print(child)
-                        data_list[-1].update(child.attrib)               
-            
-            df = pd.DataFrame(data_list)
+            if save_stem in accent_file_ids:
+                data_list = list()
+                for elem in root:
+                    if elem.tag == tag_mapping[feat][0]:
+                        elem.attrib['label'] = elem.text
+                        data_list.append(elem.attrib)
+                    for child in elem:
+                        tag = child.tag.replace('{http://nite.sourceforge.net/}', '')
+                        if tag == tag_mapping[feat][-1]:
+                            #print(child)
+                            data_list[-1].update(child.attrib)
+                        if feat == 'phones':
+                            data_list[-1].update({'label': child.text})        
+                
+                df = pd.DataFrame(data_list)
 
-            df.columns = [
-                col.replace('{http://nite.sourceforge.net/}', '') for col in df.columns
-                ]
-            os.makedirs(save_dir / feat, exist_ok=True)
-            save_path = save_dir / feat / save_stem
-            df.to_csv(save_path.with_suffix('.csv'), index=False)
+                df.columns = [
+                    col.replace('{http://nite.sourceforge.net/}', '') for col in df.columns
+                    ]
+                os.makedirs(save_dir / feat, exist_ok=True)
+                save_path = save_dir / feat / save_stem
+                if feat == 'syllables':
+                    df = get_syllable_timestamps(df, save_stem)
+                df.to_csv(save_path.with_suffix('.csv'), index=False)
 
 
-def preprocess_switchboard():
+def preprocess_switchboard_annotations():
     
     feature_list = [
     'accent', 'breaks', 'phones', 
     'phonwords', 'syllables', 'turns',
     'phrase'
+    #'syllables'
     ]
     tag_mapping = {
     'accent': ['accent', 'pointer'],
@@ -133,4 +173,4 @@ def preprocess_switchboard():
     #
     
 if __name__ == '__main__':
-    preprocess_switchboard()  
+    preprocess_switchboard_annotations()  
