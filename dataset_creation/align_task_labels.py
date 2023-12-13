@@ -51,6 +51,6 @@ def get_neural_indices(annotation_dir, accent_dir=None, step=0.02):
 
 if __name__ == '__main__':
     
-    get_neural_indices(Path('data/switchboard/phones'), accent_dir=Path('data/swtichbaord/accents'))
+    get_neural_indices(Path('data/switchboard/phones'), accent_dir=Path('data/switchbaord/accents'))
 ## Figure out how to map so that either it works with a dataloader
 ## Or I can mask out necessary tokens without recomputing every iteration
