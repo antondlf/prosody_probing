@@ -2,6 +2,31 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 from pathlib import Path
+import os
+
+
+SWITCHBOARD_PATH = Path('data/switchboard')
+
+TASK_SET = {
+    'switchboard':
+    {'phone_accents': (SWITCHBOARD_PATH / 'phones', SWITCHBOARD_PATH / 'accents'),
+     'word_accents': (SWITCHBOARD_PATH / 'phonwords', SWITCHBOARD_PATH / 'accents'),
+     'syllable_accents': (SWITCHBOARD_PATH / 'syllables', SWITCHBOARD_PATH / 'accents'),
+     
+     'stress': (SWITCHBOARD_PATH / 'syllables', None),
+     'phonemes': (SWITCHBOARD_PATH / 'phones', None),
+     
+     'f0': (SWITCHBOARD_PATH / 'f0', None)
+    },
+    
+    'mandarin-timit':
+        {
+            'tone': (Path('data/mandarin-timit/tone'), None),
+            'f0': (Path('data/mandarin/f0'), None)
+        }
+
+}
+
 
 def ms2idx(time_s, step_s=0.02):
     time_ms = int(time_s * 1000)
@@ -47,7 +72,17 @@ def get_neural_indices(annotation_dir, accent_dir=None, step=0.02):
             )
         
         experiment_df = pd.concat([experiment_df, iter_df])
-        experiment_df.to_csv(annotation_dir/'test_aggregate.csv')    
+        experiment_df.to_csv(annotation_dir/'test_aggregate.csv')   
+        
+        
+def create_task_datasets(task_set, save_dir):
+    
+    for key, value in task_set.items():
+        
+        os.makedirs(save_dir / key) 
+        
+        get_neural_indices(value[0], accent_dir=value[1])
+
 
 if __name__ == '__main__':
     
