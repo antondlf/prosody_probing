@@ -7,6 +7,8 @@ import sys
 import re
 from tqdm import tqdm
 from pathlib import Path
+from chunk_switchboard import split_move_switchboard
+pd.options.mode.chained_assignment = None
 
 root_dir = 'annotations'
 ###################################################################################
@@ -173,4 +175,5 @@ def preprocess_switchboard_annotations():
     #
     
 if __name__ == '__main__':
-    preprocess_switchboard_annotations()  
+    preprocess_switchboard_annotations() 
+    split_move_switchboard()
