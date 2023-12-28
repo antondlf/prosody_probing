@@ -148,7 +148,7 @@ def chunk_switchboard_files(root_directory, save_directory, feat_mapping=feat_la
 
     split_save = Path('corpora/nxt_switchboard_ann/split_data')
     for file in tqdm(list(root_directory.glob('*.wav'))):
-        audio_id = file.name.split('.')[0]
+        audio_id = file.stem
         split_wav(audio_id, file, split_save, feat_mapping=feat_mapping) 
         
     print('Removing backchannel phrases')
@@ -169,7 +169,8 @@ def cleanup_extra_files(root_directory, wav_directory, new_root):
         for file in feat_folder.glob('*.csv'):
             
             if file.stem not in master_list:
-                os.remove(file)
+                #os.remove(file)
+                continue
             else:
                 print(file, new_root / file.name)
                 file.rename(new_root / folder / file.name)

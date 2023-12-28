@@ -8,6 +8,8 @@ import re
 from tqdm import tqdm
 from pathlib import Path
 from chunk_switchboard import split_move_switchboard
+from convert2wav import process_switchboard_audio
+from processing_utils import check4mising_files
 pd.options.mode.chained_assignment = None
 
 root_dir = 'annotations'
@@ -175,5 +177,11 @@ def preprocess_switchboard_annotations():
     #
     
 if __name__ == '__main__':
+    process_switchboard_audio()
     preprocess_switchboard_annotations() 
     split_move_switchboard()
+    check_folder_lists = {
+    'switchboard': ['accent', 'breaks', 'phones', 'phonwords', 'phrase', 'syllables'],
+    }
+    
+    check4mising_files(check_folder_lists)

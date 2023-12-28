@@ -35,7 +35,7 @@ def ms2idx(time_s, step_s=0.02):
 
 
 ## Get the entire dataset with indices
-def get_neural_indices(annotation_dir, accent_dir=None, step=0.02):
+def get_neural_indices(annotation_dir, save_dir, accent_dir=None, step=0.02):
     
     experiment_df = pd.DataFrame()
         
@@ -43,15 +43,15 @@ def get_neural_indices(annotation_dir, accent_dir=None, step=0.02):
         iter_df = pd.read_csv(file)
         iter_df['file_id'] = file.stem
         # This format can then be exploded after reading
-        try:
-            iter_df['start_end_indices'] = iter_df.apply(
-                lambda x: [
-                    ms2idx(x.start, step_s=step),
-                    ms2idx(x.end, step_s=step)
-                    ], axis=1
-                ) 
-        except ValueError:
-            print()
+        #try:
+        iter_df['start_end_indices'] = iter_df.apply(
+            lambda x: [
+                ms2idx(x.start, step_s=step),
+                ms2idx(x.end, step_s=step)
+                ], axis=1
+            ) 
+        #except ValueError:
+        #    print()
         
         if accent_dir:
             accent_path = annotation_dir.parent / 'accent' / file.name
@@ -72,20 +72,23 @@ def get_neural_indices(annotation_dir, accent_dir=None, step=0.02):
             )
         
         experiment_df = pd.concat([experiment_df, iter_df])
-        experiment_df.to_csv(annotation_dir/'test_aggregate.csv')   
+        experiment_df.to_csv(save_dir/annotation_dir.stem)   
         
         
 def create_task_datasets(task_set, save_dir):
     
-    for key, value in task_set.items():
+    for key, (feat_dir_value, accent_dir_value) in task_set.items():
         
-        os.makedirs(save_dir / key) 
-        
-        get_neural_indices(value[0], accent_dir=value[1])
+        has_accent = 'with' if accent_dir_value is not None else 'without'
+        print(f'Creating task for {feat_dir_value.stem} {has_accent} accent values...')
+        get_neural_indices(feat_dir_value, save_dir, accent_dir=accent_dir_value)
 
 
 if __name__ == '__main__':
-    
-    get_neural_indices(Path('data/switchboard/phones'), accent_dir=Path('data/switchbaord/accents'))
+    for corpus, task_set in TASK_SET.items():
+        save_dir = Path(f'data/{corpus}/aligned_tasks')
+        os.makedirs(save_dir, exist_ok=True)
+        create_task_datasets(task_set, save_dir)
+    #get_neural_indices(Path('data/switchboard/phones'), accent_dir=Path('data/switchbaord/accents'))
 ## Figure out how to map so that either it works with a dataloader
 ## Or I can mask out necessary tokens without recomputing every iteration

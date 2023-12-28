@@ -76,7 +76,7 @@ def resample_audio(audio_dir, save_dir, original_rate=8000, target_rate=16000):
     
 
 
-def main():
+def process_switchboard_audio():
     
     corpora = ['switchboard']
     resample_corpora = {'switchboard': 8000}
@@ -118,7 +118,7 @@ def main():
        
 if __name__ == '__main__':
     
-    main()
+    process_switchboard_audio()
     
     
     
