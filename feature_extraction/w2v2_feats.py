@@ -6,6 +6,10 @@ import torch
 import numpy as np
 from acoustic_feats import get_f0, get_energy
 from transformers import logging
+from pathlib import Path
+from argparse import ArgumentParser
+from tqdm import tqdm
+import os
 
 
 MODEL_PATH_PREPEND = {
@@ -28,12 +32,12 @@ def get_feature_func(model_or_feat, layer=None):
         if layer is not None:
             model_kwargs["num_hidden_layers"] = layer if layer > 0 else 0
             
-        model = Wav2Vec2Model(model_name, **model_kwargs)
+        model = Wav2Vec2Model.from_pretrained(model_name, **model_kwargs)
         
         model.eval()
         if torch.cuda.is_available():
             model.cuda()       
-            
+        @torch.no_grad()
         def _featurize(path):
             
             input_values, rate = sf.read(path, dtype=np.float32)
@@ -60,7 +64,7 @@ def get_feature_func(model_or_feat, layer=None):
                 hidden_state = hidden_state.squeeze(0).cpu().numpy()
 
             return hidden_state
-            
+        return _featurize 
     
     else:
         if model_or_feat == 'f0':
@@ -73,6 +77,44 @@ def get_feature_func(model_or_feat, layer=None):
             pass
         elif model_or_feat == 'mfcc':
             pass
+
+
+def main():
+    
+    parser = ArgumentParser(
+        'Extract features from audio files'
+    )       
+    parser.add_argument(
+        'model', type=str, help='name of model to extract features'
+    )
+    parser.add_argument(
+        'layer', type=str, help='layer to extract features. If "all", all layers, if "none" then baseline.'
+    )
+    parser.add_argument(
+        'wavepath', type=Path, help='Path to wav files to process.'
+    )
+    parser.add_argument(
+        '-s', type=Path, default='data/feats', help="path to save features to."
+    )
+    parser.add_argument(
+        '-c', type=str, default='switchboard', help='corpus name'
+    )
+    
+    args = parser.parse_args()
+    
+    wav_path = args.wavepath
+    layer = int(args.layer) if (args.layer != 'all') or (args.layer != 'None') else args.layer
+    feat_save = args.s / args.c
+    os.makedirs(feat_save, exist_ok=True)
+    
+    if layer == 'None':
+        featurizer = get_feature_func(args.model, layer=None)
+    else:
+        featurizer = get_feature_func(args.model, layer=layer)
         
-    
-    
+    for file in tqdm(list(wav_path.glob('*.wav'))):
+        file_save = feat_save / f'layer-{str(layer)}' / f'{file.stem}.npy'
+        np.save(file_save, featurizer(file))
+        
+if __name__ == '__main__':
+    main()
