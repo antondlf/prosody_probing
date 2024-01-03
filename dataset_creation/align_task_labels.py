@@ -3,15 +3,16 @@ import numpy as np
 from tqdm import tqdm
 from pathlib import Path
 import os
-
+import shutil
 
 SWITCHBOARD_PATH = Path('data/switchboard')
 
 TASK_SET = {
     'switchboard':
-    {'phone_accents': (SWITCHBOARD_PATH / 'phones', SWITCHBOARD_PATH / 'accents'),
+    {#'phone_accents': (SWITCHBOARD_PATH / 'phones', SWITCHBOARD_PATH / 'accents'),
      'word_accents': (SWITCHBOARD_PATH / 'phonwords', SWITCHBOARD_PATH / 'accents'),
      'syllable_accents': (SWITCHBOARD_PATH / 'syllables', SWITCHBOARD_PATH / 'accents'),
+     'phone_accents': (SWITCHBOARD_PATH / 'phones', SWITCHBOARD_PATH / 'accents'),
      
      'stress': (SWITCHBOARD_PATH / 'syllables', None),
      'phonemes': (SWITCHBOARD_PATH / 'phones', None),
@@ -38,7 +39,8 @@ def ms2idx(time_s, step_s=0.02):
 def get_neural_indices(annotation_dir, save_dir, accent_dir=None, step=0.02):
     
     experiment_df = pd.DataFrame()
-        
+    tmp_dir =  save_dir / 'tmp_save'
+    os.makedirs(tmp_dir, exist_ok=True)
     for file in tqdm(list(annotation_dir.glob('*.csv'))):
         iter_df = pd.read_csv(file)
         iter_df['file_id'] = file.stem
@@ -65,15 +67,20 @@ def get_neural_indices(annotation_dir, save_dir, accent_dir=None, step=0.02):
                 lambda x:\
                     accent_file.loc[
                         (x.start <= accent_file.start) & (x.end >= accent_file.end)
-                        ]['label'] if \
+                        ][['label']] if \
                         len(accent_file.loc[
                         (x.start <= accent_file.start) & (x.end >= accent_file.end)
                         ]) > 0 else 0, axis=1
             )
-        
+        #iter_df['start_end_indices'] = iter_df.start_end_indices.map(lambda x: list(range(int(x[0]), int(x[1]))))
+        iter_df.to_csv(tmp_dir / file.name, index=False)
+    
+    for file in tmp_dir.glob('*.csv'):
+        iter_df = pd.read_csv(file)
         experiment_df = pd.concat([experiment_df, iter_df])
-        experiment_df.to_csv(save_dir/annotation_dir.stem)   
         
+    experiment_df.to_csv(save_dir/f'{annotation_dir.stem}.csv')   
+    shutil.rmtree(tmp_dir)
         
 def create_task_datasets(task_set, save_dir):
     
