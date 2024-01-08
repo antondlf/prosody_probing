@@ -25,7 +25,7 @@ def get_f0(path):
 
 def get_energy(path, match_w2v2=True):
 
-    sr, audio = wavfile.read(path)
+    _sr, audio = wavfile.read(path)
     if match_w2v2:
         return rms(y=audio, frame_length=400, hop_length=320)
     else:

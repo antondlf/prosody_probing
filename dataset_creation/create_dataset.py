@@ -7,11 +7,15 @@ import pandas as pd
 from pathlib import Path
 from tqdm import tqdm
 import time
+from ast import literal_eval
+"""Run this file as a script to test the dataset loading and make sure all files load correctly.
+Only one locally stored forward pass layer of the tested corpus is necessary to test. Watch for float
+writing and reading issues."""
 ########
 ### Load feature labels
 ### Align labels with neural feat indices
-### Generate splits for 10-fold CV
-### create dataloader object
+### Generate splits for 10-fold CV?
+
 
 class BaseDataset(Dataset):
     """Base dataset for probing tasks."""
@@ -27,7 +31,10 @@ class BaseDataset(Dataset):
         """
         self.transform = transform
         self.target_transform = target_transform
-        self.labels = pd.read_csv(csv_file).explode('start_end_indices')
+        self.annotations = csv_file
+        self.labels = pd.read_csv(csv_file)#, dtype={'start_end_indices': list})
+        self.labels['start_end_indices'] = self.labels.start_end_indices.map(literal_eval)
+        self.labels = self.labels.explode('start_end_indices', ignore_index=True).dropna().reset_index()
         self.file_list = self.labels.file_id.unique()
         self.features = np.concatenate([np.load(root_dir / f'{file}.npy') for file in self.file_list], axis=0)
         
@@ -63,6 +70,8 @@ class BaseDataset(Dataset):
             dataloader_feats = self.features[file_subset.index, :]
             print(self.features.shape, file_subset.index) 
             check_feats = np.load(root_dir / f'{file}.npy')
+            check_csv = pd.read_csv('data/switchboard/phonwords/sw4033B_t44.csv')
+            print(f"Identity of feats is {(dataloader_feats[:-2, :] == check_feats).all()}")
              
             if not dataloader_feats == check_feats:
                 raise AssertionError(f"{file} has thrown an error, it was file no. {counter}. It's loader shape was {dataloader_feats.shape}, its programatic shape was {check_feats.shape}")
@@ -73,7 +82,7 @@ class BaseDataset(Dataset):
 
 def main():
     
-    annotations = Path('data/switchboard/aligned_tasks/phonwords.csv')
+    annotations = Path('data/switchboard/aligned_tasks/phones_accents.csv')
     feat_root = Path('data/feats/switchboard/wav2vec2-base/layer-1') 
     print('Loading Dataset...')
     timestart = time.time()
