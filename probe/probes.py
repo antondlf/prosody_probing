@@ -3,6 +3,7 @@ import torch
 import numpy as np
 import abc
 import lightning as L
+from sklearn.metrics import f1_score, accuracy_score, mean_squared_error
 
 
 class LinearRegressor(torch.nn.Module):
@@ -86,7 +87,8 @@ class LitRegressor(L.LightningModule):
         x = x.view(x.size(0), -1)
         outputs = self.regresspr(x)
         test_loss = self.loss_func(outputs, y)
-        self.log("test_loss", test_loss)
+        MSE = mean_squared_error(y, outputs, squared=True)
+        self.log("test_loss", test_loss, 'MeanSquaredError', MSE)
     
     def validation_step(self, batch, batch_idx):
         # this is the validation loop
@@ -127,7 +129,9 @@ class LitClassifier(L.LightningModule):
         x = x.view(x.size(0), -1)
         outputs = self.classifier(x)
         test_loss = self.loss_func(outputs, y)
-        self.log("test_loss", test_loss)
+        f1 = f1_score(y, outputs)
+        accuracy = accuracy_score(y, outputs)
+        self.log("test_loss", test_loss, "test_f1", f1, "acc", accuracy)
     
     def validation_step(self, batch, batch_idx):
         # this is the validation loop
