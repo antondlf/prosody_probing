@@ -4,7 +4,7 @@ import soundfile as sf
 import librosa
 import torch
 import numpy as np
-from acoustic_feats import get_f0, get_energy
+from acoustic_feats import get_f0, get_energy, get_fbank, get_mfcc
 from transformers import logging
 from pathlib import Path
 from argparse import ArgumentParser
@@ -69,6 +69,7 @@ def get_feature_func(model_or_feat, layer=None):
     else:
         if model_or_feat == 'f0':
             pass
+            #return get_f0
         elif model_or_feat == 'rms':
             pass
         elif model_or_feat == 'pitch-energy':
@@ -103,7 +104,7 @@ def main():
     args = parser.parse_args()
     
     wav_path = args.wavepath
-    layer = int(args.layer) if (args.layer != 'all') or (args.layer != 'None') else args.layer
+    layer = int(args.layer) if (args.layer != 'all') and (args.layer != 'None') else args.layer
     feat_save = args.s / args.c
     os.makedirs(feat_save, exist_ok=True)
     
@@ -113,8 +114,20 @@ def main():
         featurizer = get_feature_func(args.model, layer=layer)
         
     for file in tqdm(list(wav_path.glob('*.wav'))):
-        file_save = feat_save / f'layer-{str(layer)}' / f'{file.stem}.npy'
-        np.save(file_save, featurizer(file))
+        if layer != 'None':
+            file_save = feat_save / args.model / f'layer-{str(layer)}' / f'{file.stem}.npy'
+            os.makedirs(file_save.parent, exist_ok=True)
+            if not file_save.exists():
+                np.save(file_save, featurizer(file))
+        else:
+            hidden_states = featurizer(file)
+            for l in range(0, 12):
+                file_save = feat_save / args.model / f'layer-{str(l)}' / f'{file.stem}.npy'
+                os.makedirs(file_save.parent, exist_ok=True)
+                if not file_save.exists():
+                    np.save(file_save, hidden_states[l]) 
+                
+                
         
 if __name__ == '__main__':
     main()
