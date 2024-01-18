@@ -8,7 +8,7 @@ def check_files(wav_path, corpus, check_folder_list):
     for wave in wav_path.glob('*.wav'):
         
         for feat in check_folder_list:
-            check_path = f'data/{corpus}/{feat}/{wave.stem}.csv'
+            check_path = f"data/{corpus}/{feat}/{wave.name.replace('.wav', '.csv')}"
             if not os.path.isfile(check_path):
                 
                 missing_files.append(check_path)
