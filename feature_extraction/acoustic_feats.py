@@ -3,6 +3,11 @@ import numpy as np
 from scipy.io import wavfile
 from librosa.feature import rms
 from lhotse import Fbank, FbankConfig, Mfcc, MfccConfig
+import parselmouth as prsl
+from pathlib import Path
+import pandas as pd
+import os
+from tqdm import tqdm
 
 
 def get_f0(path):
@@ -42,7 +47,15 @@ def get_fbank(path, nbins=80):
 def get_mfcc(path, nbins=80):
     sr, audio = wavfile.read(path)
     extractor = Mfcc(MfccConfig(num_mel_bins=nbins)) 
-    return extractor.extract(audio, sample_rate=sr)    
+    return extractor.extract(audio, sample_rate=sr)   
+
+
+def get_pitch_parselmouth(path):
+    
+    snd = prsl.Sound(path)
+    pitch = snd.to_pitch()
+    pitch_values = pitch.selected_array['frequency']
+    return pitch.xs(), pitch_values
     
     
 
@@ -53,3 +66,19 @@ def get_mfcc(path, nbins=80):
 # def get_mean_amplitude(): ????
 
 # def get_relative_pitch(): ????
+
+def main():
+    
+    for corpus in ['switchboard', 'mandarin-timit']:
+        wav_path = Path(f'data/{corpus}/wav')
+        
+        for file in tqdm(list(wav_path.glob('*.wav'))):
+            time, pitch = get_pitch_parselmouth(str(file))
+            filename = file.name.replace('.wav', '.csv')
+            os.makedirs(f'data/{corpus}/f0', exist_ok=True)
+            pd.DataFrame({'start': time, 'file_id': [file.stem]*len(time), 'label': pitch}).to_csv(f'data/{corpus}/f0/{filename}')
+           
+           
+if __name__ == '__main__':
+    main()
+     
