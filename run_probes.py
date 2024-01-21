@@ -1,5 +1,5 @@
 from dataset_creation.create_dataset import BaseDataset
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, GridSearchCV, cross_validate
 from probe.probes import MLPClassifier, MLPRegressor, LinearRegressor, LogisticRegressor, LitRegressor, LitClassifier
 import pandas as pd
 import os
@@ -11,6 +11,110 @@ import torch
 from lightning.pytorch.callbacks.early_stopping import EarlyStopping
 from lightning.pytorch.utilities.model_summary import ModelSummary
 from lightning.pytorch import loggers as pl_loggers
+from skorch import NeuralNetRegressor, NeuralNetClassifier
+from sklearn.linear_model import LinearRegression, LogisticRegression
+from sklearn.metrics import accuracy_score, f1_score, log_loss, roc_auc_score, make_scorer, mean_squared_error, r2_score
+import numpy as np
+
+
+def log_cross_validation(scores):
+    """Assumed to be a dict output of gc.cv_results_
+    or cross_validate().scores"""
+    
+    pass
+
+
+def train_regression(train_data, root_dir):
+    feats = list()
+    labels = list()
+    for name, group in train_data.groupby('file_id'):
+        feat_file = name + '.npy'
+        raw_feats = np.load(root_dir / feat_file)
+        
+        feats.append(raw_feats[group.start_end_indices.to_numpy(), :])
+        labels.append(group.label.to_numpy())
+        
+    X = np.concatenate(feats, axis=0)
+         
+    y = np.concatenate(labels)
+    
+    linear_model = LinearRegression()
+    cv = cross_validate(linear_model, X, y, scoring=['mean_squared_error', 'r2_score'], cv=10, n_jobs=-1)
+    log_cross_validation(cv.scores)
+    
+    linear_model.fit(X, y)
+    
+    return linear_model
+
+
+def train_logistic_regression(train_data, root_dir, binary=False):
+    
+    feats = list()
+    labels = list()
+    for name, group in train_data.groupby('file_id'):
+        feat_file = name + '.npy'
+        raw_feats = np.load(root_dir / feat_file)
+        
+        feats.append(raw_feats[group.start_end_indices.to_numpy(), :])
+        labels.append(group.label.to_numpy())
+        
+    X = np.concatenate(feats, axis=0)
+         
+    y = np.concatenate(labels)
+    
+    # Define parameters for search and scoring strategy.
+    param_grid = [{
+        'C': [1, 10, 100, 1000],'penalty': ['l1', 'l2']
+    }]
+    
+    if binary:
+        def f1_score_func(y_true, y_pred):
+            return f1_score(y_true, y_pred)
+    else:
+        def f1_score_func(y_true, y_pred):
+            return f1_score(y_true, y_pred, average='macro')
+    # from https://stackoverflow.com/questions/39044686/how-to-pass-argument-to-scoring-function-in-scikit-learns-logisticregressioncv
+    def roc_auc_score_proba(y_true, proba):
+        return roc_auc_score(y_true, proba[:, 1])
+    scores = {'f1_score': make_scorer(f1_score_func),
+                'acc': 'accuracy_score',
+                'roc': make_scorer(roc_auc_score_proba, response_method='predict_proba'),
+                'log_loss': 'log_loss'
+                }
+    
+    # instantiate and fit grid search
+    gs = GridSearchCV(LogisticRegression, param_grid,
+                 scoring=scores,
+                 refit='f1_score', 
+                 cv=10
+                 )
+    
+    gs.fit(X, y)
+
+    log_cross_validation(gs.cv_results_)
+    
+    return gs
+
+
+def train_skorch_mlp(train_data, regression_model):
+    
+    net_regr = NeuralNetRegressor(
+        regression_model,
+        max_epochs=20,
+        lr=0.1,
+        #     device='cuda',  # uncomment this to train with CUDA
+    )
+    params = {
+    'lr': [0.05, 0.1],
+    'module__num_units': [10, 20],
+    'module__dropout': [0, 0.5],
+    'optimizer__nesterov': [False, True],
+    }
+    gs = GridSearchCV(net_regr, params, refit=False, cv=5, scoring='mean_squared_error', verbose=2)
+    
+    gs.fit()
+    pass    
+
 
 def main():
     
@@ -78,6 +182,7 @@ def main():
     root_dir = args.root_dir / args.model / f'layer-{args.layer}'
     mlp = args.probe
     csv_path = args.labels
+    train, test = train_test_split(csv_data, test_size=0.2, random_state=42)
     
     if regression:
         
@@ -86,7 +191,9 @@ def main():
             model = MLPRegressor(neural_dim, 1, hidden_dim)
         
         else:
-            model = LinearRegressor(neural_dim, 1)
+            
+            #train, test = train_test_split(csv_data, test_size=0.2, random_state=42, shuffle=True)
+            model = train_regression(train, root_dir) 
             
         litModel = LitRegressor(neural_dim, 1, hidden_dim=hidden_dim)
     
@@ -95,56 +202,67 @@ def main():
             model = MLPClassifier(neural_dim, out_dim, hidden_dim)
         
         else:
-            model = LogisticRegressor(neural_dim, out_dim)
             
+            model = train_logistic_regression(train, root_dir)
+            
+                        
         litModel = LitClassifier(model, neural_dim, out_dim, hidden_dim=hidden_dim)
         
     csv_data = pd.read_csv(csv_path)
-    train, test = train_test_split(csv_data, test_size=0.2, random_state=42, shuffle=True)
     
-    train, val = train_test_split(train, test_size=0.1, random_state=550, shuffle=True)
+    if args.probe == 'linear':
+        
+        train, test = train_test_split(csv_data, test_size=0.2, random_state=42, shuffle=True)
+        
+        model = train_regression(train, root_dir, filter_silences=True)
+        test_log_regression()
     
-    train.sort_values(by=['file_id', 'start'], inplace=True)
-    test.sort_values(by=['file_id', 'start'], inplace=True)
-    val.sort_values(by=['file_id', 'start'], inplace=True)
+    elif args.probe == 'mlp':
+        train, test = train_test_split(csv_data, test_size=0.2, random_state=42, shuffle=True)
+        
+        train, val = train_test_split(train, test_size=0.1, random_state=550, shuffle=True)
+        
+        train.sort_values(by=['file_id', 'start'], inplace=True)
+        test.sort_values(by=['file_id', 'start'], inplace=True)
+        val.sort_values(by=['file_id', 'start'], inplace=True)
+        
+        os.makedirs('tmp_datasets', exist_ok=True)
+        train.to_csv(f'tmp_datasets/train_{args.task}.csv')
+        test.to_csv(f'tmp_datasets/test_{args.task}.csv')
+        val.to_csv(f'tmp_datasets/val_{args.task}.csv')
+        
+        train_loader = DataLoader(BaseDataset(Path(f'tmp_datasets/train_{args.task}.csv'), root_dir, tensor=True, filter_silences=True), batch_size=64)
+        test_loader = DataLoader(BaseDataset(Path(f'tmp_datasets/test_{args.task}.csv'), root_dir, tensor=True, filter_silences=True), batch_size=64)
+        val_loader = DataLoader(BaseDataset(Path(f'tmp_datasets/val_{args.task}.csv'), root_dir, tensor=True, filter_silences=True), batch_size=64)
+        
+        tb_logger = pl_loggers.TensorBoardLogger(save_dir=log_path)
+        trainer = L.Trainer(
+            devices=args.gpu_count, accelerator='cuda',
+            callbacks=[EarlyStopping(monitor="val_loss", mode="min")],#, ModelSummary(model, max_depth=-1)],
+            #fast_dev_run=True,
+            #num_sanity_val_steps=2,
+            logger=tb_logger
+            )
     
-    os.makedirs('tmp_datasets', exist_ok=True)
-    train.to_csv(f'tmp_datasets/train_{args.task}.csv')
-    test.to_csv(f'tmp_datasets/test_{args.task}.csv')
-    val.to_csv(f'tmp_datasets/val_{args.task}.csv')
-    
-    train_loader = DataLoader(BaseDataset(Path(f'tmp_datasets/train_{args.task}.csv'), root_dir, tensor=True, filter_silences=True), batch_size=64)
-    test_loader = DataLoader(BaseDataset(Path(f'tmp_datasets/test_{args.task}.csv'), root_dir, tensor=True, filter_silences=True), batch_size=64)
-    val_loader = DataLoader(BaseDataset(Path(f'tmp_datasets/val_{args.task}.csv'), root_dir, tensor=True, filter_silences=True), batch_size=64)
-    
-    tb_logger = pl_loggers.TensorBoardLogger(save_dir=log_path)
-    trainer = L.Trainer(
-        devices=args.gpu_count, accelerator='cuda',
-        callbacks=[EarlyStopping(monitor="val_loss", mode="min")],#, ModelSummary(model, max_depth=-1)],
-        #fast_dev_run=True,
-        #num_sanity_val_steps=2,
-        logger=tb_logger
-        )
- 
-    trainer.fit(litModel, train_loader, val_loader)
-    trainer.test(litModel, dataloaders=test_loader)
-    trainer.save_checkpoint('logs/current_model.ckpt')
-    if regression:
-        model = LitRegressor.load_from_checkpoint("logs/current_model.ckpt", model_class=model, in_dim=neural_dim, out_dim=out_dim)
-    else:
-        model = LitClassifier.load_from_checkpoint("logs/current_model.ckpt", model_class=model, in_dim=neural_dim, out_dim=out_dim)
-    model.eval()
-    test_results = list()
-    test_dataset = BaseDataset(Path(f'tmp_datasets/test_{args.task}.csv'), root_dir, tensor=True, filter_silences=True)
-    with torch.no_grad():
-        for idx in test.index:
-            test_results.append(model(test_dataset[idx][0]))
-    test[f'{mlp}_preds'] = test_results
-    os.makedirs(f'logs/test_results/', exist_ok=True)
-    test.to_csv(f'logs/test_results/layer-{args.layer}_{args.task}.csv')
-    
-    summary = ModelSummary(model, max_depth=-1)
-    print(summary)
+        trainer.fit(litModel, train_loader, val_loader)
+        trainer.test(litModel, dataloaders=test_loader)
+        trainer.save_checkpoint('logs/current_model.ckpt')
+        if regression:
+            model = LitRegressor.load_from_checkpoint("logs/current_model.ckpt", model_class=model, in_dim=neural_dim, out_dim=out_dim)
+        else:
+            model = LitClassifier.load_from_checkpoint("logs/current_model.ckpt", model_class=model, in_dim=neural_dim, out_dim=out_dim)
+        model.eval()
+        test_results = list()
+        test_dataset = BaseDataset(Path(f'tmp_datasets/test_{args.task}.csv'), root_dir, tensor=True, filter_silences=True)
+        with torch.no_grad():
+            for idx in test.index:
+                test_results.append(model(test_dataset[idx][0]))
+        test[f'{mlp}_preds'] = test_results
+        os.makedirs(f'logs/test_results/', exist_ok=True)
+        test.to_csv(f'logs/test_results/layer-{args.layer}_{args.task}.csv')
+        
+        summary = ModelSummary(model, max_depth=-1)
+        print(summary)
     
     
     
