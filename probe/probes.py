@@ -4,7 +4,8 @@ import numpy as np
 import abc
 import lightning as L
 from sklearn.metrics import f1_score, accuracy_score, mean_squared_error
-#from sklearn.linear_model import LinearRegression, LogisticRegression
+from sklearn.linear_model import LinearRegression, LogisticRegression
+from skorch import NeuralNetClassifier, NeuralNetRegressor
 
 
 class LinearRegressor(torch.nn.Module):
