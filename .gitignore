@@ -1,3 +1,5 @@
+logs
+tmp_datasets
 .vscode
 scratch_work.ipynb
 __pycache__
