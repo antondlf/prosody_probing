@@ -301,7 +301,8 @@ def main():
         if regression:
             model = train_regression(train_set, cv_log_dir)
         else:
-            model = train_logistic_classifier(train_set, cv_log_dir)
+            binary = True if args.task != 'tone' else False
+            model = train_logistic_classifier(train_set, cv_log_dir, binary=binary)
     
     print('Done training!')
     print('Beginning test loop...')
