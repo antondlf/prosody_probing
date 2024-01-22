@@ -121,7 +121,7 @@ def main():
                 np.save(file_save, featurizer(file))
         else:
             hidden_states = featurizer(file)
-            for l in range(0, 12):
+            for l in range(0, 13):
                 file_save = feat_save / args.model / f'layer-{str(l)}' / f'{file.stem}.npy'
                 os.makedirs(file_save.parent, exist_ok=True)
                 if not file_save.exists():
