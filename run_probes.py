@@ -17,6 +17,7 @@ from sklearn.metrics import accuracy_score, f1_score, log_loss,\
 roc_auc_score, make_scorer, mean_squared_error, r2_score, precision_score, recall_score
 import numpy as np
 from tqdm import tqdm
+from ast import literal_eval
 
 
 def log_cross_validation(scores, log_dir):
@@ -31,11 +32,12 @@ def get_full_dataset(data, root_dir):
     print('Retrieving dataset...')
     feats = list()
     labels = list()
+    #data = data.loc[(data.label != 'sil') & (data.label != 'SIL')]
     for name, group in tqdm(list(data.groupby('file_id'))):
         feat_file = name + '.npy'
         raw_feats = np.load(root_dir / feat_file)
-        
-        feats.append(raw_feats[group.start_end_indices.to_numpy(), :])
+        indices = group.start_end_indices.map(literal_eval).explode('start_end_indices').map(int).to_numpy()
+        feats.append(raw_feats[indices, :])
         labels.append(group.label.to_numpy())
         
     X = np.concatenate(feats, axis=0)    
@@ -94,7 +96,7 @@ def train_mlp_regressor(
     'module__h_dim': [128, 384, 512],
     }
 
-    gs = GridSearchCV(model, params, refit=False, scoring=['mean_squared_error', 'r2_score'], cv=3)
+    gs = GridSearchCV(model, params, refit=False, scoring=['neg_mean_squared_error', 'r2'], cv=3)
     gs.fit(train_data[0], train_data[1])
     
     log_cross_validation(gs.cv_results_, log_dir)
@@ -143,11 +145,20 @@ def train_mlp_classifier(train_data, module,
         train_split=False,
         device='cuda'
         )
-    scores = {'f1_score': make_scorer(f1_score_func),
-        'acc': 'accuracy_score',
-        'roc': make_scorer(roc_auc_score_proba, response_method='predict_proba'),
-        'log_loss': 'log_loss'
-        }
+    if out_dim==2:
+        
+        scores = {'f1_score': 'f1',
+            'acc': 'accuracy',
+            'roc': 'roc_auc',
+            'log_loss': 'neg_log_loss'
+            }
+    else:
+        scores = {'f1_micro': 'f1_micro',
+                  'f1_macro': 'f1_macro',
+            'acc': 'accuracy',
+            'roc': 'roc_auc',
+            'log_loss': 'neg_log_loss'
+            }
     params = {
     'lr': [0.01, 0.003, 3e-4],
     'max_epochs': [10, 20],
@@ -164,8 +175,8 @@ def train_regression(train_data, log_dir):
 
     X, y = train_data
     linear_model = LinearRegression()
-    cv = cross_validate(linear_model, X, y, scoring=['mean_squared_error', 'r2_score'], cv=10, n_jobs=-1)
-    log_cross_validation(cv.scores, log_dir)
+    cv = cross_validate(linear_model, X, y, scoring=['neg_mean_squared_error', 'r2'], cv=5, n_jobs=-1)
+    log_cross_validation(cv, log_dir)
     
     linear_model.fit(X, y)
     
@@ -182,25 +193,24 @@ def train_logistic_classifier(train_data, log_dir, binary=False):
     }]
     
     if binary:
-        def f1_score_func(y_true, y_pred):
-            return f1_score(y_true, y_pred)
+        
+        scores = {'f1_score': 'f1',
+            'acc': 'accuracy',
+            'roc': 'roc_auc',
+            'log_loss': 'neg_log_loss'
+            }
     else:
-        def f1_score_func(y_true, y_pred):
-            return f1_score(y_true, y_pred, average='macro')
-    # from https://stackoverflow.com/questions/39044686/how-to-pass-argument-to-scoring-function-in-scikit-learns-logisticregressioncv
-    def roc_auc_score_proba(y_true, proba):
-        return roc_auc_score(y_true, proba[:, 1])
-    scores = {'f1_score': make_scorer(f1_score_func),
-                'acc': 'accuracy_score',
-                'roc': make_scorer(roc_auc_score_proba, response_method='predict_proba'),
-                'log_loss': 'log_loss'
-                }
+        scores = {'f1_micro': 'f1_micro',
+                  'f1_macro': 'f1_macro',
+            'acc': 'accuracy',
+            'roc': 'roc_auc',
+            'log_loss': 'neg_log_loss'}
     
     # instantiate and fit grid search
     gs = GridSearchCV(LogisticRegression, param_grid,
                  scoring=scores,
                  refit='f1_score', 
-                 cv=10
+                 cv=5
                  )
     
     gs.fit(X, y)
@@ -262,6 +272,7 @@ def main():
     
     #train_test_split
     log_path = Path(f"logs/{args.corpus_name}/{args.task}/{args.probe}")
+    os.makedirs(log_path, exist_ok=True)
     neural_dim = args.neural_dim
     if args.task == 'f0':
         out_dim = 1
@@ -276,6 +287,7 @@ def main():
     root_dir = args.root_dir / args.model / f'layer-{args.layer}'
     mlp = args.probe
     csv_data = pd.read_csv(args.labels)
+    csv_data = csv_data.loc[(csv_data.label != 'sil') & (csv_data.label != 'SIL')]
     train, test = train_test_split(csv_data, test_size=0.2, random_state=42)
     train_set = get_full_dataset(train, root_dir)
     cv_log_dir = log_path / f"cross_val_results.csv"
@@ -307,12 +319,12 @@ def main():
     print(f"Results for {args.model} on {args.task} with {args.probe} on layer {args.layer}")
     if not regression:
         print("layer\tcorpus\tf1_score\taccuracy\tprecision\trecall")
-        print(f"{args.layer}\t{args.corpus}\t{f1_score(test_labels, y_pred)}\t{accuracy_score(test_labels,y_pred)}\t\
+        print(f"{args.layer}\t{args.corpus_name}\t{f1_score(test_labels, y_pred)}\t{accuracy_score(test_labels,y_pred)}\t\
             {precision_score(test_labels, y_pred)}\t{recall_score(test_labels, y_pred)}")
         
     else:
         print("layer\tcorpus\tmse\tr2")
-        print(f"{args.layer}\t{args.corpus}\t{mean_squared_error(test_labels, y_pred)}\{r2_score(test_labels, y_pred)}")
+        print(f"{args.layer}\t{args.corpus_name}\t{mean_squared_error(test_labels, y_pred)}\{r2_score(test_labels, y_pred)}")
         
     print() 
     
