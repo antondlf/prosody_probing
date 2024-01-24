@@ -18,16 +18,19 @@ roc_auc_score, make_scorer, mean_squared_error, r2_score, precision_score, recal
 import numpy as np
 from tqdm import tqdm
 from ast import literal_eval
+import pickle
 
 
-def log_cross_validation(scores, log_dir):
+def log_cross_validation(scores, log_dir, best_params=None):
     """Assumed to be a dict output of gc.cv_results_
     or cross_validate().scores"""
     pd.DataFrame(scores).to_csv(log_dir)
-    pass
+    if best_params:
+        with open(log_dir / 'best_params.pickle', 'w') as f:
+            pickle.dump(best_params, f)
 
 
-def get_full_dataset(data, root_dir, regression=True):
+def get_full_dataset(data, root_dir, regression=True, average_feats=False):
     
     print('Retrieving dataset...')
     feats = list()
@@ -60,7 +63,7 @@ def train_mlp_regressor(
     random_state=42,
     input_dim=768,
     h_dim=128,
-    
+    cross_validation=True
     ):
     
     torch.manual_seed(random_state)
@@ -99,14 +102,23 @@ def train_mlp_regressor(
     params = {
     'lr': [0.01, 0.003, 3e-4],
     'max_epochs': [10, 20],
-    'module__hidden_dim': [128, 384, 512],
+    'module__hidden_dim': [128, 512],
     }
     X, y = train_data
-    gs = GridSearchCV(model, params, refit='neg_mean_squared_error', scoring=['neg_mean_squared_error', 'r2'], cv=3, verbose=2)
-    gs.fit(X, y.reshape(-1, 1))
-    
-    log_cross_validation(gs.cv_results_, log_dir)
-    return gs.best_estimator_
+    if cross_validation:
+        gs = GridSearchCV(model, params, refit='neg_mean_squared_error', scoring=['neg_mean_squared_error', 'r2'], cv=3, verbose=2)
+        gs.fit(X, y.reshape(-1, 1))
+        
+        log_cross_validation(gs.cv_results_, log_dir, best_params=gs.best_params_)
+        return gs.best_estimator_
+
+    else:
+        with open(log_dir / 'best_params.pickle', 'r') as f:
+            best_params = pickle.load(f)
+        model.set_params(best_params)
+        model.fit(X, y.reshape(-1, 1))
+        return model
+
 
 def train_mlp_classifier(train_data, module,
     log_dir,
@@ -117,6 +129,7 @@ def train_mlp_classifier(train_data, module,
     input_dim=768,
     h_dim=128,
     out_dim=2,
+    cross_validation=True
     ):
     
     torch.manual_seed(random_state)
@@ -162,7 +175,7 @@ def train_mlp_classifier(train_data, module,
         scores = {'f1_score': 'f1_micro',
                   'f1_macro': 'f1_macro',
             'acc': 'accuracy',
-            'roc': 'roc_auc',
+            #'roc': 'roc_auc', not supported for multi-class classification
             'log_loss': 'neg_log_loss'
             }
     params = {
@@ -171,32 +184,43 @@ def train_mlp_classifier(train_data, module,
     'module__hidden_dim': [128, 384, 512],
     }
     X , y = train_data
-    gs = GridSearchCV(model, params, refit='f1_score', scoring=scores, cv=3, verbose=2)
-    gs.fit(X, y)
+    if cross_validation:
+        gs = GridSearchCV(model, params, refit='f1_score', scoring=scores, cv=3, verbose=2)
+        gs.fit(X, y)
+        log_cross_validation(gs.cv_results_, log_dir, best_params=gs.best_params_)
+        return gs.best_estimator_ 
     
-    log_cross_validation(gs.cv_results_, log_dir) 
-    return gs.best_estimator_
+    else:
+        with open(log_dir / 'best_params.pickle', 'r') as f:
+            best_params = pickle.load(f)
+        model.set_params(best_params)
+        return model
+     
 
 def train_regression(train_data, log_dir):
 
     X, y = train_data
     linear_model = LinearRegression()
     cv = cross_validate(linear_model, X, y, scoring=['neg_mean_squared_error', 'r2'], cv=5, n_jobs=-1, verbose=2)
-    log_cross_validation(cv, log_dir)
+    log_cross_validation(cv, log_dir, best_params=None)
     
     linear_model.fit(X, y)
     
     return linear_model
 
 
-def train_logistic_classifier(train_data, log_dir, binary=False):
+def train_logistic_classifier(train_data, log_dir, binary=False, cross_validation=True):
     
     X, y = train_data
     
     # Define parameters for search and scoring strategy.
     param_grid = [{
-        'C': [1, 10, 100, 1000],'penalty': ['l1', 'l2']
-    }]
+        'C': [1, 10, 100, 1000],'penalty': ['l2'], 'max_iter': [200]
+    },
+    {
+        'C': [1, 10, 100, 1000], 'penalty': ['l1'], 'solver': ['liblinear']
+    }
+                  ]
     
     if binary:
         
@@ -209,21 +233,29 @@ def train_logistic_classifier(train_data, log_dir, binary=False):
         scores = {'f1_score': 'f1_micro',
                   'f1_macro': 'f1_macro',
             'acc': 'accuracy',
-            'roc': 'roc_auc',
+            #'roc': 'roc_auc', not supported for multi class classification
+            # There are some workarounds but I am not implementing any.
             'log_loss': 'neg_log_loss'}
-    
-    # instantiate and fit grid search
-    gs = GridSearchCV(LogisticRegression(), param_grid,
-                 scoring=scores,
-                 refit='f1_score', 
-                 cv=5, verbose=2
-                 )
-    
-    gs.fit(X, y)
+    model = LogisticRegression()
+    if cross_validation:
+        # instantiate and fit grid search
+        gs = GridSearchCV(model, param_grid,
+                    scoring=scores,
+                    refit='f1_score', 
+                    cv=5, verbose=2
+                    )
+        
+        gs.fit(X, y)
 
-    log_cross_validation(gs.cv_results_, log_dir)
+        log_cross_validation(gs.cv_results_, log_dir, best_params=gs.best_params_)
+        
+        return gs.best_estimator_
     
-    return gs.best_estimator_
+    else:
+        with open(log_dir / 'best_params.pickle', 'r') as f:
+            best_params = pickle.load(f)
+        model.set_params(best_params)
+        return model        
 
 
 def main():
@@ -296,6 +328,12 @@ def main():
     print(f'Probing all {args.layer} layers of {args.model}')
     for layer in range(0, args.layer +1):
         
+        # Only cross validate on 0th, middle and second to last layer.
+        if layer in [0, args.layer / 2, args.layer-1]:
+            cross_validation = True
+        else:
+            cross_validation = False
+            
         root_dir = args.root_dir / args.model / f'layer-{layer}'
         if (args.task != 'f0') and(args.task != 'tone'):
             csv_data = csv_data.loc[(csv_data.label != 'sil') & (csv_data.label != 'SIL')]
@@ -307,16 +345,16 @@ def main():
         print('Starting training loop...') 
         if args.probe == 'mlp':
             if regression:
-                model = train_mlp_regressor(train_set, MLPRegressor, cv_log_dir)
+                model = train_mlp_regressor(train_set, MLPRegressor, cv_log_dir, cross_validation=cross_validation)
             else:
-                model = train_mlp_classifier(train_set, MLPClassifier, cv_log_dir, out_dim=out_dim)
+                model = train_mlp_classifier(train_set, MLPClassifier, cv_log_dir, out_dim=out_dim, cross_validation=cross_validation)
         else:
             if regression:
                 #LogisticRegression()
-                model = train_regression(train_set, cv_log_dir)
+                model = train_regression(train_set, cv_log_dir, cross_validation=cross_validation)
             else:
                 binary = True if args.task != 'tone' else False
-                model = train_logistic_classifier(train_set, cv_log_dir, binary=binary)
+                model = train_logistic_classifier(train_set, cv_log_dir, binary=binary, cross_validation=cross_validation)
         
         print('Done training!')
         print('Beginning test loop...')
