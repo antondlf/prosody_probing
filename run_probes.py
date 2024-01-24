@@ -27,7 +27,7 @@ def log_cross_validation(scores, log_dir):
     pass
 
 
-def get_full_dataset(data, root_dir):
+def get_full_dataset(data, root_dir, regression=True):
     
     print('Retrieving dataset...')
     feats = list()
@@ -36,9 +36,15 @@ def get_full_dataset(data, root_dir):
     for name, group in tqdm(list(data.groupby('file_id'))):
         feat_file = name + '.npy'
         raw_feats = np.load(root_dir / feat_file)
-        indices = group.start_end_indices.map(literal_eval).explode('start_end_indices').map(int).to_numpy()
+        group.dropna(inplace=True)
+        group['start_end_indices'] = group.start_end_indices.map(literal_eval)
+        full_group = group.explode('start_end_indices')
+        indices = full_group.start_end_indices.map(int).to_numpy()            
         feats.append(raw_feats[indices, :])
-        labels.append(group.label.to_numpy())
+        if regression:
+            labels.append(full_group.label.astype(np.float32).to_numpy())
+        else:
+            labels.append(full_group.label.astype(int).to_numpy())
         
     X = np.concatenate(feats, axis=0)    
     y = np.concatenate(labels)
@@ -86,18 +92,18 @@ def train_mlp_regressor(
         iterator_valid__num_workers=4,
         # Scoring callbacks.
         callbacks=callbacks,
-        train_split=False,
+        train_split=True,
         device='cuda'
         )
     
     params = {
     'lr': [0.01, 0.003, 3e-4],
     'max_epochs': [10, 20],
-    'module__h_dim': [128, 384, 512],
+    'module__hidden_dim': [128, 384, 512],
     }
-
-    gs = GridSearchCV(model, params, refit=False, scoring=['neg_mean_squared_error', 'r2'], cv=3)
-    gs.fit(train_data[0], train_data[1])
+    X, y = train_data
+    gs = GridSearchCV(model, params, refit='neg_mean_squared_error', scoring=['neg_mean_squared_error', 'r2'], cv=3)
+    gs.fit(X, y.reshape(-1, 1))
     
     log_cross_validation(gs.cv_results_, log_dir)
     return gs.best_estimator_
@@ -125,7 +131,7 @@ def train_mlp_classifier(train_data, module,
         ('EarlyStop', EarlyStopping()))
 
     # Instantiate our classifier.
-    model = NeuralNetRegressor(
+    model = NeuralNetClassifier(
         # Network parameters.
         module, module__out_dim=out_dim, module__hidden_dim=h_dim,
         module__in_dim=input_dim,
@@ -142,7 +148,7 @@ def train_mlp_classifier(train_data, module,
         iterator_valid__num_workers=4,
         # Scoring callbacks.
         callbacks=callbacks,
-        train_split=False,
+        train_split=True,
         device='cuda'
         )
     if out_dim==2:
@@ -153,7 +159,7 @@ def train_mlp_classifier(train_data, module,
             'log_loss': 'neg_log_loss'
             }
     else:
-        scores = {'f1_micro': 'f1_micro',
+        scores = {'f1_score': 'f1_micro',
                   'f1_macro': 'f1_macro',
             'acc': 'accuracy',
             'roc': 'roc_auc',
@@ -162,11 +168,11 @@ def train_mlp_classifier(train_data, module,
     params = {
     'lr': [0.01, 0.003, 3e-4],
     'max_epochs': [10, 20],
-    'module__h_dim': [128, 384, 512],
+    'module__hidden_dim': [128, 384, 512],
     }
-
-    gs = GridSearchCV(model, params, refit=False, scoring=scores, cv=3)
-    gs.fit(train_data[0], train_data[1])
+    X , y = train_data
+    gs = GridSearchCV(model, params, refit='f1_score', scoring=scores, cv=3)
+    gs.fit(X, y)
     
     log_cross_validation(gs.cv_results_, log_dir) 
     return gs.best_estimator_
@@ -273,6 +279,9 @@ def main():
     #train_test_split
     log_path = Path(f"logs/{args.corpus_name}/{args.task}/{args.probe}")
     os.makedirs(log_path, exist_ok=True)
+    
+    csv_data = pd.read_csv(args.labels)
+    train, test = train_test_split(csv_data, test_size=0.2, random_state=42)
     neural_dim = args.neural_dim
     if args.task == 'f0':
         out_dim = 1
@@ -284,50 +293,54 @@ def main():
         out_dim = 2
         regression = False
     hidden_dim = args.hidden_dim
-    root_dir = args.root_dir / args.model / f'layer-{args.layer}'
-    mlp = args.probe
-    csv_data = pd.read_csv(args.labels)
-    csv_data = csv_data.loc[(csv_data.label != 'sil') & (csv_data.label != 'SIL')]
-    train, test = train_test_split(csv_data, test_size=0.2, random_state=42)
-    train_set = get_full_dataset(train, root_dir)
-    cv_log_dir = log_path / f"cross_val_results.csv"
-    print('Starting training loop...') 
-    if mlp == 'mlp':
-        if regression:
-            model = train_mlp_regressor(train_set, MLPRegressor, cv_log_dir, out_dim=out_dim)
-        else:
-            model = train_mlp_classifier(train_set, MLPClassifier, cv_log_dir, out_dim=out_dim)
-    else:
-        if regression:
-            model = train_regression(train_set, cv_log_dir)
-        else:
-            binary = True if args.task != 'tone' else False
-            model = train_logistic_classifier(train_set, cv_log_dir, binary=binary)
-    
-    print('Done training!')
-    print('Beginning test loop...')
-    test_feats, test_labels = get_full_dataset(test, root_dir)
-    y_pred = model.predict(test_feats)
-    
-    print()
-    print('Testing done, outputting results...')
-    results = pd.DataFrame({
-        'file_id': test.file_id, 'neural_index': test.start_end_indices, 'y_pred': y_pred, 'y_true': test_labels
-    })
-   
-    results.to_csv(f"{log_path}/layer_{args.layer}.csv") 
-    
-    print(f"Results for {args.model} on {args.task} with {args.probe} on layer {args.layer}")
-    if not regression:
-        print("layer\tcorpus\tf1_score\taccuracy\tprecision\trecall")
-        print(f"{args.layer}\t{args.corpus_name}\t{f1_score(test_labels, y_pred)}\t{accuracy_score(test_labels,y_pred)}\t\
-            {precision_score(test_labels, y_pred)}\t{recall_score(test_labels, y_pred)}")
+    print(f'Probing all {args.layer} layers of {args.model}')
+    for layer in range(0, args.layer +1):
         
-    else:
-        print("layer\tcorpus\tmse\tr2")
-        print(f"{args.layer}\t{args.corpus_name}\t{mean_squared_error(test_labels, y_pred)}\{r2_score(test_labels, y_pred)}")
+        root_dir = args.root_dir / args.model / f'layer-{layer}'
+        if (args.task != 'f0') and(args.task != 'tone'):
+            csv_data = csv_data.loc[(csv_data.label != 'sil') & (csv_data.label != 'SIL')]
+        else:
+            csv_data = csv_data.loc[(csv_data.label != 0)&(csv_data.label != 'sil')& (csv_data.label != 'SIL')]
+            
+        train_set = get_full_dataset(train, root_dir, regression=regression)
+        cv_log_dir = log_path / f"cross_val_results_{layer}.csv"
+        print('Starting training loop...') 
+        if args.probe == 'mlp':
+            if regression:
+                model = train_mlp_regressor(train_set, MLPRegressor, cv_log_dir)
+            else:
+                model = train_mlp_classifier(train_set, MLPClassifier, cv_log_dir, out_dim=out_dim)
+        else:
+            if regression:
+                model = train_regression(train_set, cv_log_dir)
+            else:
+                binary = True if args.task != 'tone' else False
+                model = train_logistic_classifier(train_set, cv_log_dir, binary=binary)
         
-    print() 
+        print('Done training!')
+        print('Beginning test loop...')
+        test_feats, test_labels = get_full_dataset(test, root_dir)
+        y_pred = model.predict(test_feats)
+        
+        print()
+        print('Testing done, outputting results...')
+        results = pd.DataFrame({
+            'file_id': test.file_id, 'neural_index': test.start_end_indices, 'y_pred': y_pred, 'y_true': test_labels
+        })
+    
+        results.to_csv(f"{log_path}/layer_{layer}.csv") 
+        
+        print(f"Results for {args.model} on {args.task} with {args.probe} on layer {layer}")
+        if not regression:
+            print("layer\tcorpus\tf1_score\taccuracy\tprecision\trecall")
+            print(f"{layer}\t{args.corpus_name}\t{f1_score(test_labels, y_pred)}\t{accuracy_score(test_labels,y_pred)}\t\
+                {precision_score(test_labels, y_pred)}\t{recall_score(test_labels, y_pred)}")
+            
+        else:
+            print("layer\tcorpus\tmse\tr2")
+            print(f"{layer}\t{args.corpus_name}\t{mean_squared_error(test_labels, y_pred)}\{r2_score(test_labels, y_pred)}")
+            
+        print() 
     
     
 if __name__ == '__main__':
