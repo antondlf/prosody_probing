@@ -102,7 +102,7 @@ def train_mlp_regressor(
     'module__hidden_dim': [128, 384, 512],
     }
     X, y = train_data
-    gs = GridSearchCV(model, params, refit='neg_mean_squared_error', scoring=['neg_mean_squared_error', 'r2'], cv=3)
+    gs = GridSearchCV(model, params, refit='neg_mean_squared_error', scoring=['neg_mean_squared_error', 'r2'], cv=3, verbose=2)
     gs.fit(X, y.reshape(-1, 1))
     
     log_cross_validation(gs.cv_results_, log_dir)
@@ -171,7 +171,7 @@ def train_mlp_classifier(train_data, module,
     'module__hidden_dim': [128, 384, 512],
     }
     X , y = train_data
-    gs = GridSearchCV(model, params, refit='f1_score', scoring=scores, cv=3)
+    gs = GridSearchCV(model, params, refit='f1_score', scoring=scores, cv=3, verbose=2)
     gs.fit(X, y)
     
     log_cross_validation(gs.cv_results_, log_dir) 
@@ -181,7 +181,7 @@ def train_regression(train_data, log_dir):
 
     X, y = train_data
     linear_model = LinearRegression()
-    cv = cross_validate(linear_model, X, y, scoring=['neg_mean_squared_error', 'r2'], cv=5, n_jobs=-1)
+    cv = cross_validate(linear_model, X, y, scoring=['neg_mean_squared_error', 'r2'], cv=5, n_jobs=-1, verbose=2)
     log_cross_validation(cv, log_dir)
     
     linear_model.fit(X, y)
@@ -216,7 +216,7 @@ def train_logistic_classifier(train_data, log_dir, binary=False):
     gs = GridSearchCV(LogisticRegression(), param_grid,
                  scoring=scores,
                  refit='f1_score', 
-                 cv=5
+                 cv=5, verbose=2
                  )
     
     gs.fit(X, y)
