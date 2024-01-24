@@ -206,14 +206,14 @@ def train_logistic_classifier(train_data, log_dir, binary=False):
             'log_loss': 'neg_log_loss'
             }
     else:
-        scores = {'f1_micro': 'f1_micro',
+        scores = {'f1_score': 'f1_micro',
                   'f1_macro': 'f1_macro',
             'acc': 'accuracy',
             'roc': 'roc_auc',
             'log_loss': 'neg_log_loss'}
     
     # instantiate and fit grid search
-    gs = GridSearchCV(LogisticRegression, param_grid,
+    gs = GridSearchCV(LogisticRegression(), param_grid,
                  scoring=scores,
                  refit='f1_score', 
                  cv=5
@@ -312,6 +312,7 @@ def main():
                 model = train_mlp_classifier(train_set, MLPClassifier, cv_log_dir, out_dim=out_dim)
         else:
             if regression:
+                #LogisticRegression()
                 model = train_regression(train_set, cv_log_dir)
             else:
                 binary = True if args.task != 'tone' else False
