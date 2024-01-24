@@ -47,7 +47,7 @@ def map_tone(word_df, phone_df):
             (phone_df.start >= row.start) &\
                 (phone_df.end <= row.end)
                     ]
-        df_subset['tone'] = df_subset.char.map(lambda x: next(tone_iterator) if x in vowel_inventory else 0)
+        df_subset['tone'] = df_subset.char.map(lambda x: next(tone_iterator) if x in vowel_inventory else 'SIL' if x == 'sil' else 0)
         phone_and_tone = pd.concat([phone_and_tone, df_subset])
     
     return phone_and_tone
