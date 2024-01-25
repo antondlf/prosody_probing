@@ -20,6 +20,7 @@ import numpy as np
 from tqdm import tqdm
 from ast import literal_eval
 import pickle
+import traceback
 
 
 def log_cross_validation(scores, log_dir, best_params=None):
@@ -31,29 +32,36 @@ def log_cross_validation(scores, log_dir, best_params=None):
             pickle.dump(best_params, f)
 
 
-def get_full_dataset(data, root_dir, regression=True, average_feats=False):
+def get_full_dataset(data, root_dir, regression=True, average_feats=False, testing=False):
     
     print('Retrieving dataset...')
     feats = list()
     labels = list()
+    test_df = pd.DataFrame()
     #data = data.loc[(data.label != 'sil') & (data.label != 'SIL')]
     for name, group in tqdm(list(data.groupby('file_id'))):
         feat_file = name + '.npy'
         raw_feats = np.load(root_dir / feat_file)
         group.dropna(inplace=True)
         group['start_end_indices'] = group.start_end_indices.map(literal_eval)
-        full_group = group.explode('start_end_indices')
-        indices = full_group.start_end_indices.map(int).to_numpy()            
-        feats.append(raw_feats[indices, :])
-        if regression:
-            labels.append(full_group.label.astype(np.float32).to_numpy())
-        else:
-            labels.append(full_group.label.astype(int).to_numpy())
+        group = group[group.start_end_indices.map(lambda x: len(x) > 0)]
+        if len(group) > 0:
+            full_group = group.explode('start_end_indices')
+            indices = full_group.start_end_indices.map(int).to_numpy()            
+            feats.append(raw_feats[indices, :])
+            if regression:
+                labels.append(full_group.label.astype(np.float32).to_numpy())
+            else:
+                labels.append(full_group.label.astype(int).to_numpy())
+            if testing:
+                test_df = pd.concat([test_df, full_group])
         
     X = np.concatenate(feats, axis=0)    
     y = np.concatenate(labels)
-    
-    return X, y
+    if not testing:
+        return X, y
+    else:
+        return X, y, test_df
 
 
 def train_mlp_regressor(
@@ -64,7 +72,8 @@ def train_mlp_regressor(
     random_state=42,
     input_dim=768,
     h_dim=128,
-    cross_validation=True
+    cross_validation=True,
+    best_params=True
     ):
     torch.cuda.empty_cache()
     torch.manual_seed(random_state)
@@ -113,9 +122,10 @@ def train_mlp_regressor(
         return gs.best_estimator_
 
     else:
-        with open(log_dir / 'best_params.pickle', 'r') as f:
-            best_params = pickle.load(f)
-        model.set_params(best_params)
+        if best_params:
+            with open(log_dir.parent / 'best_params.pickle', 'r') as f:
+                best_params = pickle.load(f)
+            model.set_params(best_params)
         model.fit(X, y.reshape(-1, 1))
         return model
 
@@ -129,7 +139,8 @@ def train_mlp_classifier(train_data, module,
     input_dim=768,
     h_dim=128,
     out_dim=2,
-    cross_validation=True
+    cross_validation=True,
+    best_params=True
     ):
     torch.cuda.empty_cache()
     torch.manual_seed(random_state)
@@ -200,25 +211,28 @@ def train_mlp_classifier(train_data, module,
         return gs.best_estimator_ 
     
     else:
-        with open(log_dir / 'best_params.pickle', 'r') as f:
-            best_params = pickle.load(f)
-        model.set_params(best_params)
+        if best_params:
+            with open(log_dir.parent / 'best_params.pickle', 'r') as f:
+                best_params = pickle.load(f)
+            model.set_params(best_params)
+        model.fit(X, y)
         return model
      
 
-def train_regression(train_data, log_dir):
+def train_regression(train_data, log_dir, cross_validation=True):
 
     X, y = train_data
-    linear_model = LinearRegression(n_jobs=-1)
-    cv = cross_validate(linear_model, X, y, scoring=['neg_mean_squared_error', 'r2'], cv=3, n_jobs=-1, verbose=2)
-    log_cross_validation(cv, log_dir, best_params=None)
-    
+    linear_model = LinearRegression()
+    if cross_validation:
+        cv = cross_validate(linear_model, X, y, scoring=['neg_mean_squared_error', 'r2'], cv=3, verbose=2)
+        log_cross_validation(cv, log_dir, best_params=None)
+        
     linear_model.fit(X, y)
     
     return linear_model
 
 
-def train_logistic_classifier(train_data, log_dir, binary=False, cross_validation=True):
+def train_logistic_classifier(train_data, log_dir, binary=False, cross_validation=True, best_params=True):
     
     X, y = train_data
     
@@ -245,7 +259,7 @@ def train_logistic_classifier(train_data, log_dir, binary=False, cross_validatio
             #'roc': 'roc_auc', not supported for multi class classification
             # There are some workarounds but I am not implementing any.
             'log_loss': 'neg_log_loss'}
-    model = LogisticRegression(n_jobs=-1)
+    model = LogisticRegression()
     if cross_validation:
         # instantiate and fit grid search
         gs = GridSearchCV(model, param_grid,
@@ -262,9 +276,11 @@ def train_logistic_classifier(train_data, log_dir, binary=False, cross_validatio
         return gs.best_estimator_
     
     else:
-        with open(log_dir / 'best_params.pickle', 'r') as f:
-            best_params = pickle.load(f)
-        model.set_params(best_params)
+        if best_params:
+            with open(log_dir.parent / 'best_params.pickle', 'r') as f:
+                best_params = pickle.load(f)
+            model.set_params(best_params)
+        model.fit(X, y)
         return model        
 
 
@@ -322,11 +338,18 @@ def main():
     """
     
     #train_test_split
-    log_path = Path(f"logs/{args.corpus_name}/{args.task}/{args.probe}")
+    log_path = Path(f"logs/{args.corpus_name}/{args.task}/{args.model}/{args.probe}")
     os.makedirs(log_path, exist_ok=True)
     
     csv_data = pd.read_csv(args.labels)
-    train, test = train_test_split(csv_data, test_size=0.2, random_state=42)
+    if (args.task != 'f0') and (args.task != 'tone'):
+        csv_data = csv_data.loc[(csv_data.label != 'sil') & (csv_data.label != 'SIL')]
+    else:
+        csv_data = csv_data.loc[(csv_data.label != 0)&(csv_data.label != 'sil')& (csv_data.label != 'SIL')]
+    # Data loading progress bar will look similar for test and train
+    # That is because split is on individual data points
+    # not individual files
+    train, test = train_test_split(csv_data, test_size=0.2, random_state=42) #stratify='file_id', but I want to split file ids
     neural_dim = args.neural_dim
     if args.task == 'f0':
         out_dim = 1
@@ -337,65 +360,93 @@ def main():
     else:
         out_dim = 2
         regression = False
+    if args.model in ['wav2vec2-large', 'wav2vec2-xls-r-300m']:
+        neural_dim = 1024
     hidden_dim = args.hidden_dim
     print(f'Probing all {args.layer} layers of {args.model}')
     for layer in range(0, args.layer +1):
-        
+ 
         # Only cross validate on 0th, middle and second to last layer.
         if layer in [0, args.layer / 2, args.layer-1]:
             cross_validation = True
         else:
             cross_validation = False
             
+        ####################
+        # In case training
+        # needs to be sped up
+        cross_validation = False
+        best_params=False
+        ####################  
+           
         root_dir = args.root_dir / args.model / f'layer-{layer}'
-        if (args.task != 'f0') and(args.task != 'tone'):
-            csv_data = csv_data.loc[(csv_data.label != 'sil') & (csv_data.label != 'SIL')]
-        else:
-            csv_data = csv_data.loc[(csv_data.label != 0)&(csv_data.label != 'sil')& (csv_data.label != 'SIL')]
+
             
         train_set = get_full_dataset(train, root_dir, regression=regression)
         cv_log_dir = log_path / f"cross_val_results_{layer}.csv"
         print('Starting training loop...') 
         if args.probe == 'mlp':
             if regression:
-                model = train_mlp_regressor(train_set, MLPRegressor, cv_log_dir, cross_validation=cross_validation, batch=args.batch_size)
+                model = train_mlp_regressor(train_set, MLPRegressor, cv_log_dir, cross_validation=cross_validation, batch=args.batch_size, input_dim=neural_dim, best_params=best_params)
             else:
-                model = train_mlp_classifier(train_set, MLPClassifier, cv_log_dir, out_dim=out_dim, cross_validation=cross_validation, batch=args.batch_size)
+                model = train_mlp_classifier(train_set, MLPClassifier, cv_log_dir, out_dim=out_dim, cross_validation=cross_validation, batch=args.batch_size, input_dim=neural_dim, best_params=best_params)
         else:
             if regression:
                 #LogisticRegression()
                 model = train_regression(train_set, cv_log_dir, cross_validation=cross_validation)
             else:
                 binary = True if args.task != 'tone' else False
-                model = train_logistic_classifier(train_set, cv_log_dir, binary=binary, cross_validation=cross_validation)
+                model = train_logistic_classifier(train_set, cv_log_dir, binary=binary, cross_validation=cross_validation, best_params=best_params)
         
         print('Done training!')
         print('Beginning test loop...')
-        test_feats, test_labels = get_full_dataset(test, root_dir)
+        test_feats, test_labels, test_df = get_full_dataset(test, root_dir, regression=regression, testing=True)
         y_pred = model.predict(test_feats)
 
         print()
         print('Testing done, outputting results...')        
         print(f"Results for {args.model} on {args.task} with {args.probe} on layer {layer}")
         if not regression:
+            f1_result = f1_score(test_labels, y_pred) if binary else f1_score(test_labels, y_pred, average='micro'),
+            precision_result = precision_score(test_labels, y_pred) if binary else precision_score(test_labels, y_pred, average='micro')
+            recall_result = recall_score(test_labels, y_pred) if binary else recall_score(test_labels, y_pred, average='micro')
             print("layer\tcorpus\tf1_score\taccuracy\tprecision\trecall")
-            print(f"{layer}\t{args.corpus_name}\t{f1_score(test_labels, y_pred)}\t{accuracy_score(test_labels,y_pred)}\t\
-                {precision_score(test_labels, y_pred)}\t{recall_score(test_labels, y_pred)}")
+            print(f"{layer}\t{args.corpus_name}\t{f1_result}\t{accuracy_score(test_labels,y_pred)}\t\
+                {precision_result}\t{recall_result}")
             y_pred_proba = model.predict_proba(test_feats)
             classes = model.classes_
-            result_dict = {'file_id': test.file_id, 'neural_index': test.start_end_indices, 'y_true': test_labels, 'y_pred': y_pred, 'y_proba': (classes, y_pred_proba)}
+            result_dict = {
+                'file_id': test_df.file_id, 'neural_index': test_df.start_end_indices,
+                'y_true': test_labels, 'y_pred': y_pred,
+                #'y_proba': y_pred_proba,
+                #'classes': [classes]*len(test_df)
+                }
+            with open(log_path / f'layer-{layer}_distribution.txt', 'w') as f:
+                for c in classes:
+                    f.write(f"{str(c)}\t")
+                f.write('\n')
+                for prob in y_pred_proba:
+                    for p in prob:
+                        f.write(f"{str(p)}\t")
+                    f.write('\n')
+                        
             
         else:
             print("layer\tcorpus\tmse\tr2")
             print(f"{layer}\t{args.corpus_name}\t{mean_squared_error(test_labels, y_pred)}\{r2_score(test_labels, y_pred)}")
             result_dict = {
-            'file_id': test.file_id, 'neural_index': test.start_end_indices, 'y_pred': y_pred, 'y_true': test_labels
+            'file_id': test_df.file_id, 'neural_index': test_df.start_end_indices, 'y_pred': y_pred, 'y_true': test_labels
             }
         print('Outputting result dataframe...')
         print()
-        results = pd.DataFrame(result_dict)
+        try:
+            results = pd.DataFrame(result_dict)
     
-        results.to_csv(f"{log_path}/layer_{layer}.csv")  
+            results.to_csv(f"{log_path}/layer_{layer}.csv")  
+        except ValueError:
+            print(traceback.format_exc())
+            for k, v in result_dict.items():
+                print(f"{k}: {len(v)}")
     
 if __name__ == '__main__':
     main()   
