@@ -13,7 +13,7 @@ import os
 
 
 MODEL_PATH_PREPEND = {
-    'wav2vec2-large-960h': 'facebook',
+    'wav2vec2-large': 'facebook',
     'wav2vec2-large-robust': 'facebook',
     'wav2vec2-large-xlsr-53': 'facebook',
     'wav2vec2-xls-r-300m': 'facebook',
@@ -121,11 +121,11 @@ def main():
                 np.save(file_save, featurizer(file))
         else:
             hidden_states = featurizer(file)
-            for l in range(0, 13):
-                file_save = feat_save / args.model / f'layer-{str(l)}' / f'{file.stem}.npy'
+            for i, state in enumerate(hidden_states):
+                file_save = feat_save / args.model / f'layer-{str(i)}' / f'{file.stem}.npy'
                 os.makedirs(file_save.parent, exist_ok=True)
                 if not file_save.exists():
-                    np.save(file_save, hidden_states[l]) 
+                    np.save(file_save, state) 
                 
                 
         
