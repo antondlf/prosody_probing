@@ -188,7 +188,7 @@ def get_neural_indices(annotation_dir, save_dir, wav_dir, accent_dir=None, binar
                     else:
                         iter_df.loc[iter_df.index[-1]+1] = {
                             'start': iter_df.iloc[-1, 1],
-                            'end': librosa.get_duration(path=wav_dir / f"{file.stem}.wav"),
+                            #'end': librosa.get_duration(path=wav_dir / f"{file.stem}.wav"),
                             'label': 'sil',
                             'file_id': file.stem,
                             'start_end_indices': iter_df.iloc[-1, -1][-1]+1
