@@ -1,21 +1,21 @@
-import pandas as pd
-import numpy as np
 from tqdm import tqdm
 from pathlib import Path
+import pandas as pd
+import numpy as np
+import soundfile as sf
 import os
 import shutil
 import math
-import soundfile as sf
 import librosa
 
 SWITCHBOARD_PATH = Path('data/switchboard')
 
 TASK_SET = {
     'switchboard':
-    {'phone_accents': (SWITCHBOARD_PATH / 'phones', SWITCHBOARD_PATH / 'accents', SWITCHBOARD_PATH / 'wav'),
+    {#'phone_accents': (SWITCHBOARD_PATH / 'phones', SWITCHBOARD_PATH / 'accents', SWITCHBOARD_PATH / 'wav'),
      'word_accents': (SWITCHBOARD_PATH / 'phonwords', SWITCHBOARD_PATH / 'accents', SWITCHBOARD_PATH / 'wav'),
      'syllable_accents': (SWITCHBOARD_PATH / 'syllables', SWITCHBOARD_PATH / 'accents', SWITCHBOARD_PATH / 'wav'),
-     #'phone_accents': (SWITCHBOARD_PATH / 'phones', SWITCHBOARD_PATH / 'accents', SWITCHBOARD_PATH / 'wav'),
+     'phone_accents': (SWITCHBOARD_PATH / 'phones', SWITCHBOARD_PATH / 'accents', SWITCHBOARD_PATH / 'wav'),
      
      'stress': (SWITCHBOARD_PATH / 'syllables', None, SWITCHBOARD_PATH / 'wav'),
      
