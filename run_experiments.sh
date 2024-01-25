@@ -8,20 +8,19 @@ echo $current_path
 DATA_DIR="$current_path/../../data/"
 FEATS_DIR="$DATA_DIR/feats/"
 #MODEL_NAMES="wav2vec2-large-robust"
-MODEL_NAMES="wav2vec2-base mandarin-wav2vec2"
+MODEL_NAMES="wav2vec2-base mandarin-wav2vec2 wav2vec2-large wav2vec2-xls-r-300m"
 LAYER="all"
-PROBES="mlp linear"
+PROBES=$1
 CORPORA="mandarin-timit switchboard"
 FEATURES="phones_accents phonwords_accents syllables_accents f0"
 ##############################################################################
 # Configuration
 ##############################################################################
 nj=-1   # Number of parallel jobs for CPU operations.
-stage=1
+stage=0
 gpu=4
 
 mkdir -p logs/
-
 
 ##############################################################################
 # Extract features
@@ -45,11 +44,17 @@ fi
 # Run classification tasks.
 ##############################################################################
 if [ $stage -le 1 ]; then
-  for corpus in $CORPORA; do
-    if [ $corpus == 'mandarin-timit' ]; then
-      FEATURES="tone f0"
-    fi
+
     for model in $MODEL_NAMES; do
+        if [ $model == 'wav2vec2-large' ]; then
+          layer=24
+        else
+          layer=12
+        fi
+    for corpus in $CORPORA; do
+        if [ $corpus == 'mandarin-timit' ]; then
+          FEATURES="tone f0"
+        fi
         for feature in $FEATURES; do
         for probe in $PROBES; do
           echo "Processing $feature from $model"
@@ -57,10 +62,10 @@ if [ $stage -le 1 ]; then
           echo "$0: Running classification experiments..."
 
           echo "$model $probe layer $i regression" >> logs/${model}_${feature}.stdout
-              python3 run_probes.py $model 12 -l data/$corpus/aligned_tasks/${feature}.csv \
+              python3 run_probes.py $model $layers -l data/$corpus/aligned_tasks/${feature}.csv \
              -d data/feats/$corpus -c $corpus -t $feature -r True -p $probe --gpu_count $gpu
-                  >> logs/${model}_${feature}_${probe}.stdout \
-                  2>> logs/${model}_${feature}_${probe}.stderr &
+                  >> logs/${model}_${feature}_${corpus}_${probe}.stdout \
+                  2>> logs/${model}_${feature}_${corpus}_${probe}.stderr &
     	  wait
     	  done
     done
