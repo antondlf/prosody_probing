@@ -46,7 +46,7 @@ fi
 if [ $stage -le 1 ]; then
 
     for model in $MODEL_NAMES; do
-        if [ $model == 'wav2vec2-large' ]; then
+        if [ $model == 'wav2vec2-large' ] || [ $model == "wav2vec2-xls-r-300m" ]; then
           layer=24
         else
           layer=12
