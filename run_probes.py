@@ -11,6 +11,7 @@ import torch
 from lightning.pytorch.utilities.model_summary import ModelSummary
 from lightning.pytorch import loggers as pl_loggers
 from skorch import NeuralNetRegressor, NeuralNetClassifier
+from skorch.dataset import Dataset
 from skorch.callbacks import EarlyStopping, GradientNormClipping
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score, log_loss,\
@@ -59,13 +60,13 @@ def train_mlp_regressor(
     train_data, module, log_dir,
     criterion=torch.nn.MSELoss,
     optim=torch.optim.SGD,
-    batch=625,
+    batch=128,
     random_state=42,
     input_dim=768,
     h_dim=128,
     cross_validation=True
     ):
-    
+    torch.cuda.empty_cache()
     torch.manual_seed(random_state)
     callbacks = []
 
@@ -95,14 +96,13 @@ def train_mlp_regressor(
         iterator_valid__num_workers=4,
         # Scoring callbacks.
         callbacks=callbacks,
-        train_split=True,
         device='cuda'
         )
     
     params = {
     'lr': [0.01, 0.003, 3e-4],
     'max_epochs': [10, 20],
-    'module__hidden_dim': [128, 512],
+    'module__hidden_dim': [128, 384],
     }
     X, y = train_data
     if cross_validation:
@@ -124,14 +124,14 @@ def train_mlp_classifier(train_data, module,
     log_dir,
     criterion=torch.nn.CrossEntropyLoss,
     optim=torch.optim.SGD,
-    batch=625,
+    batch=128,
     random_state=42,
     input_dim=768,
     h_dim=128,
     out_dim=2,
     cross_validation=True
     ):
-    
+    torch.cuda.empty_cache()
     torch.manual_seed(random_state)
     callbacks = []
 
@@ -141,8 +141,13 @@ def train_mlp_classifier(train_data, module,
 
     # Allow early stopping.
     callbacks.append(
-        ('EarlyStop', EarlyStopping()))
-
+        ('EarlyStop', EarlyStopping(monitor='valid_loss')))
+    X, y = train_data
+    #X_train, X_valid, y_train, y_valid = train_test_split(X, y, test_size=0.2)
+    
+    #train_dataset = Dataset(X_train, y=y_train)
+    #valid_dataset = Dataset(X_valid, y=y_valid)
+    train_dataset = Dataset(X, y=y)
     # Instantiate our classifier.
     model = NeuralNetClassifier(
         # Network parameters.
@@ -159,9 +164,10 @@ def train_mlp_classifier(train_data, module,
         iterator_train__shuffle=True,
         iterator_train__num_workers=4,
         iterator_valid__num_workers=4,
+        #dataset
+        dataset = train_dataset,
         # Scoring callbacks.
         callbacks=callbacks,
-        train_split=True,
         device='cuda'
         )
     if out_dim==2:
@@ -181,12 +187,15 @@ def train_mlp_classifier(train_data, module,
     params = {
     'lr': [0.01, 0.003, 3e-4],
     'max_epochs': [10, 20],
-    'module__hidden_dim': [128, 384, 512],
+    'module__hidden_dim': [128, 384],
     }
-    X , y = train_data
+
     if cross_validation:
-        gs = GridSearchCV(model, params, refit='f1_score', scoring=scores, cv=3, verbose=2)
-        gs.fit(X, y)
+        gs = GridSearchCV(model, params, refit='log_loss',
+                          scoring=scores, cv=3, verbose=2,
+                          n_jobs=-1
+                          )
+        gs.fit(train_dataset.X, train_dataset.y)
         log_cross_validation(gs.cv_results_, log_dir, best_params=gs.best_params_)
         return gs.best_estimator_ 
     
@@ -200,8 +209,8 @@ def train_mlp_classifier(train_data, module,
 def train_regression(train_data, log_dir):
 
     X, y = train_data
-    linear_model = LinearRegression()
-    cv = cross_validate(linear_model, X, y, scoring=['neg_mean_squared_error', 'r2'], cv=5, n_jobs=-1, verbose=2)
+    linear_model = LinearRegression(n_jobs=-1)
+    cv = cross_validate(linear_model, X, y, scoring=['neg_mean_squared_error', 'r2'], cv=3, n_jobs=-1, verbose=2)
     log_cross_validation(cv, log_dir, best_params=None)
     
     linear_model.fit(X, y)
@@ -236,13 +245,14 @@ def train_logistic_classifier(train_data, log_dir, binary=False, cross_validatio
             #'roc': 'roc_auc', not supported for multi class classification
             # There are some workarounds but I am not implementing any.
             'log_loss': 'neg_log_loss'}
-    model = LogisticRegression()
+    model = LogisticRegression(n_jobs=-1)
     if cross_validation:
         # instantiate and fit grid search
         gs = GridSearchCV(model, param_grid,
                     scoring=scores,
-                    refit='f1_score', 
-                    cv=5, verbose=2
+                    refit='log_loss', 
+                    cv=3, verbose=2,
+                    n_jobs=-1
                     )
         
         gs.fit(X, y)
@@ -280,6 +290,9 @@ def main():
     )
     parser.add_argument(
         '-o', '--output_dim', type=int, default=1, help="Output dimension of probe."
+    )
+    parser.add_argument(
+        '-b', '--batch_size', type=int, default=128, help='batch size for mlp training'
     )
     parser.add_argument(
         '-d', '--root_dir', type=Path, default=Path('data/feats/switchboard'), help='Path to probed features'
@@ -345,9 +358,9 @@ def main():
         print('Starting training loop...') 
         if args.probe == 'mlp':
             if regression:
-                model = train_mlp_regressor(train_set, MLPRegressor, cv_log_dir, cross_validation=cross_validation)
+                model = train_mlp_regressor(train_set, MLPRegressor, cv_log_dir, cross_validation=cross_validation, batch=args.batch_size)
             else:
-                model = train_mlp_classifier(train_set, MLPClassifier, cv_log_dir, out_dim=out_dim, cross_validation=cross_validation)
+                model = train_mlp_classifier(train_set, MLPClassifier, cv_log_dir, out_dim=out_dim, cross_validation=cross_validation, batch=args.batch_size)
         else:
             if regression:
                 #LogisticRegression()
@@ -360,27 +373,29 @@ def main():
         print('Beginning test loop...')
         test_feats, test_labels = get_full_dataset(test, root_dir)
         y_pred = model.predict(test_feats)
-        
+
         print()
-        print('Testing done, outputting results...')
-        results = pd.DataFrame({
-            'file_id': test.file_id, 'neural_index': test.start_end_indices, 'y_pred': y_pred, 'y_true': test_labels
-        })
-    
-        results.to_csv(f"{log_path}/layer_{layer}.csv") 
-        
+        print('Testing done, outputting results...')        
         print(f"Results for {args.model} on {args.task} with {args.probe} on layer {layer}")
         if not regression:
             print("layer\tcorpus\tf1_score\taccuracy\tprecision\trecall")
             print(f"{layer}\t{args.corpus_name}\t{f1_score(test_labels, y_pred)}\t{accuracy_score(test_labels,y_pred)}\t\
                 {precision_score(test_labels, y_pred)}\t{recall_score(test_labels, y_pred)}")
+            y_pred_proba = model.predict_proba(test_feats)
+            classes = model.classes_
+            result_dict = {'file_id': test.file_id, 'neural_index': test.start_end_indices, 'y_true': test_labels, 'y_pred': y_pred, 'y_proba': (classes, y_pred_proba)}
             
         else:
             print("layer\tcorpus\tmse\tr2")
             print(f"{layer}\t{args.corpus_name}\t{mean_squared_error(test_labels, y_pred)}\{r2_score(test_labels, y_pred)}")
-            
-        print() 
+            result_dict = {
+            'file_id': test.file_id, 'neural_index': test.start_end_indices, 'y_pred': y_pred, 'y_true': test_labels
+            }
+        print('Outputting result dataframe...')
+        print()
+        results = pd.DataFrame(result_dict)
     
+        results.to_csv(f"{log_path}/layer_{layer}.csv")  
     
 if __name__ == '__main__':
     main()   
