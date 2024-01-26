@@ -101,8 +101,8 @@ def train_mlp_regressor(
         optimizer=optim,
         # Parallelization.
         iterator_train__shuffle=True,
-        iterator_train__num_workers=4,
-        iterator_valid__num_workers=4,
+        iterator_train__num_workers=-1,
+        iterator_valid__num_workers=-1,
         # Scoring callbacks.
         callbacks=callbacks,
         device='cuda'
@@ -173,8 +173,8 @@ def train_mlp_classifier(train_data, module,
         optimizer=optim,
         # Parallelization.
         iterator_train__shuffle=True,
-        iterator_train__num_workers=4,
-        iterator_valid__num_workers=4,
+        iterator_train__num_workers=-1,
+        iterator_valid__num_workers=-1,
         #dataset
         dataset = train_dataset,
         # Scoring callbacks.
@@ -342,6 +342,7 @@ def main():
     os.makedirs(log_path, exist_ok=True)
     
     csv_data = pd.read_csv(args.labels)
+    csv_data['speaker'] = csv_data.file_id.map(lambda x: x.split('_')[0])
     if (args.task != 'f0') and (args.task != 'tone'):
         csv_data = csv_data.loc[(csv_data.label != 'sil') & (csv_data.label != 'SIL')]
     else:
@@ -349,7 +350,10 @@ def main():
     # Data loading progress bar will look similar for test and train
     # That is because split is on individual data points
     # not individual files
-    train, test = train_test_split(csv_data, test_size=0.2, random_state=42) #stratify='file_id', but I want to split file ids
+    train_speakers, test_speakers = train_test_split(csv_data.speaker.unique(), test_size=0.2, random_state=42) #stratify='file_id', but I want to split file ids
+    train = csv_data.loc[csv_data.speaker.isin(train_speakers)]
+    test = csv_data.loc[csv_data.speaker.isin(test_speakers)]
+    
     neural_dim = args.neural_dim
     if args.task == 'f0':
         out_dim = 1
