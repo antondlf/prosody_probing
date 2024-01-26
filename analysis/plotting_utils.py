@@ -32,6 +32,8 @@ def calculate_metric(df, metric_name):
     else:
         if metric_name == 'f1_micro':
             return metric(df.y_true, df.y_pred, average='micro')
+        elif metric_name == 'pearson':
+            return metric(df.y_true, df.y_pred)[0]
         else:
             return metric(df.y_true, df.y_pred)
         
@@ -97,9 +99,9 @@ def main():
     plot_list = [
         
         (mand_english_comparison, 'mandarin-timit', 'tone', 'linear', 'plots/base_tone_linear.png'),
-        #(mand_english_comparison, 'mandarin-timit', 'f0', 'linear', 'plots/base_mandarin_f0_linear.png'),
+        ([('mandarin-wav2vec2', 12)], 'mandarin-timit', 'f0', 'linear', 'plots/base_mandarin_f0_linear.png'),
         ([('wav2vec2-base', 12), ('mandarin-wav2vec2', 12)], 'switchboard', 'phones_accents', 'linear', 'plots/base_switchboard_phone_accents_linear.png'),
-        #(mand_english_comparison, 'switchboard', 'f0', 'linear', 'plots/base_switchboard_f0_linear.png'),
+        ([('wav2vec2-base', 12)], 'switchboard', 'f0', 'linear', 'plots/base_switchboard_f0_linear.png'),
  
     ]
     
