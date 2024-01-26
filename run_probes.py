@@ -259,7 +259,7 @@ def train_logistic_classifier(train_data, log_dir, binary=False, cross_validatio
             #'roc': 'roc_auc', not supported for multi class classification
             # There are some workarounds but I am not implementing any.
             'log_loss': 'neg_log_loss'}
-    model = LogisticRegression()
+    model = LogisticRegression(penalty='l1', solver='liblinear')
     if cross_validation:
         # instantiate and fit grid search
         gs = GridSearchCV(model, param_grid,
