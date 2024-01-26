@@ -98,7 +98,7 @@ def main():
         
         (mand_english_comparison, 'mandarin-timit', 'tone', 'linear', 'plots/base_tone_linear.png'),
         #(mand_english_comparison, 'mandarin-timit', 'f0', 'linear', 'plots/base_mandarin_f0_linear.png'),
-        ([('wav2vec2-base', 12), ('mandarin-wav2vec2', 10)], 'switchboard', 'phones_accents', 'linear', 'plots/base_switchboard_phone_accents_linear.png'),
+        ([('wav2vec2-base', 12), ('mandarin-wav2vec2', 12)], 'switchboard', 'phones_accents', 'linear', 'plots/base_switchboard_phone_accents_linear.png'),
         #(mand_english_comparison, 'switchboard', 'f0', 'linear', 'plots/base_switchboard_f0_linear.png'),
  
     ]
