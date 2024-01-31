@@ -2,6 +2,7 @@ import crepe
 import numpy as np
 from scipy.io import wavfile
 from librosa.feature import rms
+from librosa import times_like
 from lhotse import Fbank, FbankConfig, Mfcc, MfccConfig
 import parselmouth as prsl
 from pathlib import Path
@@ -22,7 +23,7 @@ def get_f0(path):
         mean_frequency = np.mean(time.reshape(-1, 2), axis=1)
     
     else:
-        mean_frequency = np.concatenate(np.mean(frequency[:-1].reshape(-1, 2), axis=1), frequency[-1])
+        mean_frequency = np.append(np.mean(frequency[:-1].reshape(-1, 2), axis=1), frequency[-1])
     
     downsample_time = time[0::2]
     
@@ -32,22 +33,26 @@ def get_energy(path, match_w2v2=True):
 
     _sr, audio = wavfile.read(path)
     if match_w2v2:
-        return rms(y=audio, frame_length=400, hop_length=320)
+        rms_values = rms(y=audio, frame_length=400, hop_length=320)
+        times = times_like(rms_values)
+        return times, rms_values
     else:
-        return rms(y=audio)
+        rms_values = rms(y=audio)
+        return times_like(rms_values), rms_values
         
 
 def get_fbank(path, nbins=80):
 
     sr, audio = wavfile.read(path)
-    extractor = Fbank(FbankConfig(num_mel_bins=nbins)) 
-    return extractor.extract(audio, sample_rate=sr)
+    extractor = Fbank(FbankConfig(num_mel_bins=nbins, frame_shift=0.02)) 
+    return extractor.extract(audio.astype(np.float32), sr)
+    #return np.mean(fbank.reshape(-1, 10), axis=1) 
 
 
 def get_mfcc(path, nbins=80):
     sr, audio = wavfile.read(path)
-    extractor = Mfcc(MfccConfig(num_mel_bins=nbins)) 
-    return extractor.extract(audio, sample_rate=sr)   
+    extractor = Mfcc(MfccConfig(num_mel_bins=nbins, frame_shift=0.02)) 
+    return extractor.extract(audio.astype(np.float32), sr)   
 
 
 def get_pitch_parselmouth(path):
@@ -56,6 +61,15 @@ def get_pitch_parselmouth(path):
     pitch = snd.to_pitch()
     pitch_values = pitch.selected_array['frequency']
     return pitch.xs(), pitch_values
+
+
+def get_pitch_energy(path):
+    
+    pitch_time, pitch = get_f0(path)
+    rms_time, rms = get_energy(path, match_w2v2=True)
+    
+    return pitch_time, np.vstack((pitch, rms))
+    
     
     
 
@@ -73,10 +87,10 @@ def main():
         wav_path = Path(f'data/{corpus}/wav')
         
         for file in tqdm(list(wav_path.glob('*.wav'))):
-            time, pitch = get_pitch_parselmouth(str(file))
+            time, pitch_energy = get_pitch_energy(str(file))
             filename = file.name.replace('.wav', '.csv')
-            os.makedirs(f'data/{corpus}/f0', exist_ok=True)
-            pd.DataFrame({'start': time, 'file_id': [file.stem]*len(time), 'label': pitch}).to_csv(f'data/{corpus}/f0/{filename}')
+            os.makedirs(f'data/{corpus}/pitch_energy', exist_ok=True)
+            pd.DataFrame({'start': time, 'file_id': [file.stem]*len(time), 'label': pitch_energy}).to_csv(f'data/{corpus}/pitch_energy/{filename}')
            
            
 if __name__ == '__main__':
