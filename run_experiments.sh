@@ -8,16 +8,16 @@ echo $current_path
 DATA_DIR="$current_path/../../data/"
 FEATS_DIR="$DATA_DIR/feats/"
 #MODEL_NAMES="wav2vec2-large-robust"
-MODEL_NAMES="wav2vec2-base mandarin-wav2vec2 wav2vec2-large wav2vec2-xls-r-300m"
+MODEL_NAMES=$2 #"mandarin-wav2vec2 wav2vec2-base wav2vec2-large wav2vec2-xls-r-300m"
 LAYER="all"
 PROBES=$1
-CORPORA="switchboard mandarin-timit"
+CORPORA="mandarin-timit switchboard"
 FEATURES="syllables_accents phonwords_accents f0 phones_accents"
 ##############################################################################
 # Configuration
 ##############################################################################
 nj=-1   # Number of parallel jobs for CPU operations.
-stage=1
+stage=0
 gpu=4
 
 mkdir -p logs/
@@ -28,7 +28,11 @@ mkdir -p logs/
 if [ $stage -le 0 ]; then
   for corpus in $CORPORA; do
 	for model in $MODEL_NAMES; do
-		python3 feature_extraction/w2v2_feats.py $model 'None' data/$corpus/wav -c $corpus
+    if [ $model == 'fbank' ] || [ $model == "mfcc" ]; then
+      python3 feature_extraction/w2v2_feats.py $model 0 data/$corpus/wav -c $corpus 
+    else
+		  python3 feature_extraction/w2v2_feats.py $model 'None' data/$corpus/wav -c $corpus
+    fi
 	done
     done
 
@@ -48,12 +52,21 @@ if [ $stage -le 1 ]; then
     for model in $MODEL_NAMES; do
         if [ $model == 'wav2vec2-large' ] || [ $model == "wav2vec2-xls-r-300m" ]; then
           layer=24
+        elif [ $model == "fbank" ] || [ $model == "mfcc" ]; then
+          layer=0
         else
           layer=12
         fi
     for corpus in $CORPORA; do
-        if [ $corpus == 'mandarin-timit' ]; then
-          FEATURES="f0 tone"
+        if [ $corpus == 'mandarin-timit' ]; then #&& [ [ $model == 'wav2vec2-large' ] || [ $model == 'wav2vec2-xls-r-300m' ] ]; then
+          FEATURES="tone f0"
+        
+        #elif [ $corpus == 'mandarin-timit' ]; then
+        #  FEATURES="tone"
+        #elif [ $model == 'wav2vec2-base' ]; then
+        #  FEATURES=""
+        else
+          FEATURES="syllables_accents phonwords_accents f0 phones_accents"
 
         fi
         for feature in $FEATURES; do
