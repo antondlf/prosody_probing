@@ -4,7 +4,7 @@ import soundfile as sf
 import librosa
 import torch
 import numpy as np
-from acoustic_feats import get_f0, get_energy, get_fbank, get_mfcc
+from acoustic_feats import get_f0, get_energy, get_fbank, get_mfcc, get_pitch_energy
 from transformers import logging
 from pathlib import Path
 from argparse import ArgumentParser
@@ -19,7 +19,9 @@ MODEL_PATH_PREPEND = {
     'wav2vec2-xls-r-300m': 'facebook',
     'mandarin-wav2vec2': 'kehanlu',
     'wav2vec2-base': 'facebook',
-    'mms-300m': 'facebook'
+    'mms-300m': 'facebook',
+    'mandarin-wav2vec2-aishell1': 'kehanlu',
+    'wav2vec2-base-100h': 'facebook'
 }
 
 def get_feature_func(model_or_feat, layer=None):
@@ -68,16 +70,16 @@ def get_feature_func(model_or_feat, layer=None):
     
     else:
         if model_or_feat == 'f0':
-            pass
-            #return get_f0
+            return get_f0
+
         elif model_or_feat == 'rms':
-            pass
+            return get_energy
         elif model_or_feat == 'pitch-energy':
-            pass
+            return get_pitch_energy
         elif model_or_feat == 'fbank':
-            pass
+            return get_fbank
         elif model_or_feat == 'mfcc':
-            pass
+            return get_mfcc
 
 
 def main():
@@ -115,10 +117,16 @@ def main():
         
     for file in tqdm(list(wav_path.glob('*.wav'))):
         if layer != 'None':
-            file_save = feat_save / args.model / f'layer-{str(layer)}' / f'{file.stem}.npy'
-            os.makedirs(file_save.parent, exist_ok=True)
-            if not file_save.exists():
-                np.save(file_save, featurizer(file))
+            if args.model in ['fbank', 'mfcc', 'pitch_energy', 'f0', 'rms']:
+                file_save = feat_save / args.model / f'layer-{0}' / f'{file.stem}.npy'
+                os.makedirs(file_save.parent, exist_ok=True)
+                if not file_save.exists():
+                    np.save(file_save, featurizer(file))
+            else:
+                file_save = feat_save / args.model / f'layer-{str(layer)}' / f'{file.stem}.npy'
+                os.makedirs(file_save.parent, exist_ok=True)
+                if not file_save.exists():
+                    np.save(file_save, featurizer(file))
         else:
             hidden_states = featurizer(file)
             for i, state in enumerate(hidden_states):
