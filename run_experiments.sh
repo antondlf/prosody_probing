@@ -8,16 +8,16 @@ echo $current_path
 DATA_DIR="$current_path/../../data/"
 FEATS_DIR="$DATA_DIR/feats/"
 #MODEL_NAMES="wav2vec2-large-robust"
-MODEL_NAMES=$2 #"mandarin-wav2vec2 wav2vec2-base wav2vec2-large wav2vec2-xls-r-300m"
+MODEL_NAMES="mandarin-wav2vec2 wav2vec2-base wav2vec2-large wav2vec2-xls-r-300m"
 LAYER="all"
 PROBES=$1
 CORPORA="mandarin-timit switchboard"
-FEATURES="stress" #syllables_accents f0"
+FEATURES="stress syllables_accents f0"
 ##############################################################################
 # Configuration
 ##############################################################################
 nj=-1   # Number of parallel jobs for CPU operations.
-stage=1
+stage=0
 gpu=4
 
 mkdir -p logs/
