@@ -12,12 +12,12 @@ MODEL_NAMES=$2 #"mandarin-wav2vec2 wav2vec2-base wav2vec2-large wav2vec2-xls-r-3
 LAYER="all"
 PROBES=$1
 CORPORA="mandarin-timit switchboard"
-FEATURES="syllables_accents phonwords_accents f0 phones_accents"
+FEATURES="stress" #syllables_accents f0"
 ##############################################################################
 # Configuration
 ##############################################################################
 nj=-1   # Number of parallel jobs for CPU operations.
-stage=0
+stage=1
 gpu=4
 
 mkdir -p logs/
@@ -50,7 +50,9 @@ fi
 if [ $stage -le 1 ]; then
     for probe in $PROBES; do
     for model in $MODEL_NAMES; do
-        if [ $model == 'wav2vec2-large' ] || [ $model == "wav2vec2-xls-r-300m" ]; then
+        if [ $model == 'wav2vec2-large' ] || [ $model == "wav2vec2-xls-r-300m" ] ||\
+         [ $model == "wav2vec2-large-xlsr-53" ] || [ $model == "wav2vec2-large-xlsr-53-chinese-zh-cn" ] ||\
+          [ $model == "wav2vec2-large-960h" ]; then
           layer=24
         elif [ $model == "fbank" ] || [ $model == "mfcc" ]; then
           layer=0
@@ -59,14 +61,20 @@ if [ $stage -le 1 ]; then
         fi
     for corpus in $CORPORA; do
         if [ $corpus == 'mandarin-timit' ]; then #&& [ [ $model == 'wav2vec2-large' ] || [ $model == 'wav2vec2-xls-r-300m' ] ]; then
-          FEATURES="tone f0"
+          if [ $model == 'wav2vec2-base' ] || [ $model == 'mandarin-wav2vec2' ]; then
+            continue
+          else
+            FEATURES="tone f0"
+          fi
         
-        #elif [ $corpus == 'mandarin-timit' ]; then
-        #  FEATURES="tone"
+        elif [ $corpus == 'switchboard' ]; then
+          if [ $model == 'wav2vec2-base' ] || [ $model == 'mandarin-wav2vec2' ]; then
+            FEATURES="stress"
         #elif [ $model == 'wav2vec2-base' ]; then
         #  FEATURES=""
-        else
-          FEATURES="syllables_accents phonwords_accents f0 phones_accents"
+          else
+            FEATURES="syllables_accents f0 stress"
+          fi
 
         fi
         for feature in $FEATURES; do
