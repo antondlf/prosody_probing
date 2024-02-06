@@ -10,7 +10,8 @@ from tqdm import tqdm
 
 
 def translate2dotname(file_id, feat):
-    return f'{file_id[:6]}{file_id[6]}_{file_id.split("_")[-1]}'
+    #return f'{file_id[:6]}{file_id[6]}_{file_id.split("_")[-1]}'
+    return f"{file_id}.1"
 
 
 def translate2long(file, wav_file, column='y_pred'):
@@ -45,17 +46,17 @@ def create_tier(tg, feat_name, csv_data, tiertype='IntervalTier'):
         for row in csv_data.itertuples():
             if row.start < row.end:
                 try:
-                    tier.add_interval(row.start, row.end, row.label,)
+                    tier.add_interval(row.start, row.end, str(row.label),)
                 except AttributeError:
-                    tier.add_interval(row.start, row.end, row.stress)
+                    tier.add_interval(row.start, row.end, str(row.stress))
                 except Exception:
-                    tier.add_interval(row.start + 0.001, row.end, row.label)
+                    tier.add_interval(row.start + 0.001, row.end, str(row.label))
                 #except Exception:
                 #    continue
     
     elif tiertype == 'TextTier':
         for row in csv_data.itertuples():
-            tier.add_point(row.start, row.label)
+            tier.add_point(row.start, str(row.label))
 
 
 def generate_tier(data, tg, tier_name):
@@ -118,25 +119,40 @@ def main():
         #result_logs / result_filename
     ],
     # this will not work because turns will be output
-    'switchboard':[   
+    'switchboard':
+        [   
         #Path(f'data/switchboard/phones'),
         Path(f'data/switchboard/phonwords'),
         Path(f'data/switchboard/syllables'),
-        Path('data/switchboard/accents'),
+        Path('data/switchboard/accent'),
         Path(f'logs_01-29-2024/switchboard/syllables_accents/wav2vec2-base/linear/layer_9.csv'),  
-    ]}
+    ],
+    'switchboard_stress':
+        [
+            Path(f'data/switchboard/phonwords'),
+            Path(f'data/switchboard/syllables'),
+            Path('data/switchboard/accent'),
+            Path(f'logs_02-05-2024/logs/switchboard/stress/wav2vec2-base/linear/layer_8.csv'),   
+        ]
+    }
     
     for corpus, annotation_list in annotation_dict.items():
-        if corpus == 'mandarin-timit':
+        if (corpus == 'mandarin-timit') or (corpus == 'switchboard'):
             continue
-        save_dir = Path(f'analysis/inspection/{corpus}/layer_9')#{result_feature}_{result_layer}_{result_probe}/'
+        if corpus == 'switchboard_stress':
+            corpus_name = 'switchboard'
+        else:
+            corpus_name == corpus
+        # print(corpus)
+        save_dir = Path(f'analysis/inspection/{corpus}/{annotation_list[-1].stem}')#{result_feature}_{result_layer}_{result_probe}/'
         os.makedirs(save_dir, exist_ok=True)
+        ls = pd.read_csv(annotation_list[-1]).file_id.unique()
         #ls = [file.stem for file in list(Path(f'data/{corpus}/accent').glob('*.csv'))]
-        for file in tqdm(list(Path(f'data/{corpus}/wav').glob('*.wav'))):
-            #if file.stem in ls:
-            generation_success = generate_textgrid(file, annotation_list, save_dir)
-            if generation_success:
-                shutil.copy(file, save_dir / file.name)
+        for file in tqdm(list(Path(f'data/{corpus_name}/wav').glob('*.wav'))):
+            if file.stem in ls:
+                generation_success = generate_textgrid(file, annotation_list, save_dir)
+                if generation_success:
+                    shutil.copy(file, save_dir / file.name)
             
         
 if __name__ == '__main__':
