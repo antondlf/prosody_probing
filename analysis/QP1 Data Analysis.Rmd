@@ -1,0 +1,183 @@
+---
+title: "QP1 Data Analysis"
+output: pdf_document
+date: "2024-01-31"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Data Analysis and Plotting
+
+```{r}
+library(ggplot2)
+library(dplyr)
+data <- read.csv('full_results.csv')
+factor.cols <- c("model", "model_names", "model_state", "model_size", "language", "probe", "task", "corpus", "task_name")
+num.cols <- c("score")
+int.cols <- c("layer")
+data[factor.cols] <- lapply(data[factor.cols], as.factor)
+data[num.cols] <- lapply(data[num.cols], as.numeric)
+data[int.cols] <- lapply(data[int.cols], as.integer)
+
+data_target_loss <- read.csv('full_results_alternative.csv')
+data_target_loss[factor.cols] <- lapply(data_target_loss[factor.cols], as.factor)
+data_target_loss[num.cols] <- lapply(data_target_loss[num.cols], as.numeric)
+
+data
+```
+
+## Section 1: Mandarin Vs. English pre-trained base models
+
+### Comparing Mandarin tone performance vs English pitch accent performance
+
+```{r}
+data.base.pretrained <- data[((data$task == 'tone')|(data$task == 'syllables_accents'))&((data$model == 'wav2vec2-base') | (data$model == 'mandarin-wav2vec2')),]
+data.base.pretrained %>% ggplot(
+  aes(x=layer, y=score, shape=model_names, color=model_names)) +
+  geom_point() +
+  geom_line() +
+  ylim(0.5, 1) +
+  facet_wrap(~task_name) +
+  ggtitle('Pre-trained (~1000h) Base Wav2vec2.0 model Layerwise Performance')
+
+data.base.pretrained %>% ggplot(
+  aes(x=layer, y=score, shape=model_names, color=model_names)) +
+  geom_point() +
+  geom_line() +
+  ylim(0.5, 1) +
+  facet_wrap(~task_name, nrow=2) +
+  ggtitle('Pre-trained (~1000h) Base Wav2vec2.0 model Layerwise Performance')
+```
+
+Both of these tasks peak on layer 9, indicating some connection between the two linguistic phenomena from the perspective of the architecture. The fact that both models perform better on their trained language indicates that both lexical tone and phrasal pitch accent are learned from the distribution of acoustic cues in training.
+
+### Comparing models on F0 in a Mandarin Corpus and an English Corpus
+
+```{r}
+data.base.pretrained.f0 <- data[(data$task == 'f0')&((data$model == 'wav2vec2-base') | (data$model == 'mandarin-wav2vec2')),]
+
+data.base.pretrained.f0 %>% ggplot(
+  aes(x=layer, y=score, shape=model_names, color=model_names)) +
+  geom_point() +
+  geom_line() +
+  ylim(0.6, 1) +
+  facet_wrap(~corpus) +
+  ggtitle('Pre-trained (~1000h) Base Wav2vec2.0 model Layerwise Performance')
+
+#data.base.pretrained.f0 %>% ggplot(
+#  aes(x=layer, y=score, shape=model_names, color=model_names)) +
+#  geom_point() +
+#  geom_line() +
+#  ylim(0.6, 1) +
+#  facet_wrap(~corpus, nrow=2) +
+#  ggtitle('Pre-trained (~1000h) Base Wav2vec2.0 model Layerwise Performance')
+```
+
+This figure shows that the performance on Lexical Tone and English Phrasal Pitch accents that both models show is not related to their sensitivity to F0. There is also no sense in which the ability of these models to encode F0 in Herz is related to the language of the data. There is a difference in performance between mandarin-timit There is no observable difference between the Mandarin and English models for F0 on either dataset. There last two layers of the english base model and the mandarin model are slightly different, we offer no accoutn for why this is. There is a difference on both models' performance on mandarin-timit and switchboard, and this is likely due to the fact that Mandarin Timit has cleaner audio and is not upsampled, which may have been a challenge for the pitch extraction algorithm we used.
+
+## Section 2.1: Stress vs. Tone
+
+```{r}
+data.base.pretrained.stress <- data[((data$task == 'stress') | (data$task == 'tone') | (data$task == 'syllables_accents'))&((data$model == 'wav2vec2-base') | (data$model == 'mandarin-wav2vec2')),]
+
+data.base.pretrained.stress %>% ggplot(
+  aes(x=layer, y=score, shape=model_names, color=model_names)) +
+  geom_point() +
+  geom_line() +
+  #ylim(0.6, 1) +
+  facet_wrap(~task_name) +
+  ggtitle('Pre-trained (~1000h) Base Wav2vec2.0 model Layerwise Performance')
+```
+
+
+## Section 2: Comparing Fine-tuned and Pre-trained models
+
+### Comparison of Mandarin pre-trained and fine-tuned models on Prosody and Tone.
+
+```{r}
+finetune.comparison.mandarin <- data[((data$task == 'tone')|(data$task == 'syllables_accents'))&(data$language == 'Mandarin'),]
+#data.tone.base.pretrained <- data[(data$task == 'tone')&((data$model == 'wav2vec2-base-100h') | (data$model == 'mandarin-wav2vec2-aishell1')),] 
+finetune.comparison.mandarin %>% ggplot(
+  aes(x=layer, y=score, shape=model_names, color=model_names)) +
+  geom_point() +
+  geom_line() +
+  ylim(0.5, 1) +
+  facet_wrap(~task_name) +
+  ggtitle('Pre-trained (~1000h) vs. Fine-tuned (~100h) Mandarin Wav2vec2.0 Base Models')
+
+#finetune.comparison.mandarin %>% ggplot(
+#  aes(x=layer, y=score, shape=model_names, color=model_names)) +
+#  geom_point() +
+#  geom_line() +
+#  ylim(0.5, 1) +
+#  facet_wrap(~task_name, nrow=2) +
+#  ggtitle('Pre-trained (~1000h) vs. Fine-tuned (~100h) Mandarin Wav2vec2.0 Base Models')
+```
+
+There is also an effect of fine tuning on later layer encoding of Tone for the Mandarin model. When fine tuned on 175h of Aishell1, the model performs better than its pre-trained counterpart on Tone classification. This is not observable, or at least not as clearly, in the English phrasal accent case. There is a clear effect of fine-tuning on Tone recognition for the mandarin-trained model. After Fine-tuning on \~175 hours of Aishell 1 data the mandarin model becomes better at tone recognition in the Mandarin dataset. The same is not observable for English pitch accents, though there is a slight improvement in performance in the last two layers.
+
+### Comparison of English Pre-trained and Fine-tuned models on Prosody and Tone.
+
+```{r}
+finetune.comparison.english <- data[((data$task == 'tone')|(data$task == 'syllables_accents'))&(data$language == 'English') & (data$model_size == 'Base'),]
+#data.tone.base.pretrained <- data[(data$task == 'tone')&((data$model == 'wav2vec2-base-100h') | (data$model == 'mandarin-wav2vec2-aishell1')),] 
+finetune.comparison.english %>% ggplot(
+  aes(x=layer, y=score, shape=model_names, color=model_names)) +
+  geom_point() +
+  geom_line() +
+  ylim(0.4, 1) +
+  facet_wrap(~task_name) +
+  ggtitle('Pre-trained (~1000h) vs. Fine-tuned (~100h) Mandarin Wav2vec2.0 Base Models')
+
+#finetune.comparison.english %>% ggplot(
+#  aes(x=layer, y=score, shape=model_names, color=model_names)) +
+#  geom_point() +
+#  geom_line() +
+#  ylim(0.4, 1) +
+#  facet_wrap(~task_name, nrow=2) +
+#  ggtitle('Pre-trained (~1000h) vs. Fine-tuned (~100h) Mandarin Wav2vec2.0 Base Models')
+```
+
+Though we observe the same pattern as with Mandarin with the English model, the effect is not very strong. It is worth noting, however, that for the English data the model performs slightly better at Pitch Accent classification but for Tone the pre-trained model performs better in some layers.
+
+### Comparison of Mandarin Pre-trained and Fine-tuned models on F0.
+
+```{r}
+data.base.pretrained.f0.mandarin <- data[(data$task == 'f0')&(data$model_size == 'Base'),]
+
+data.base.pretrained.f0.mandarin %>% ggplot(
+  aes(x=layer, y=score, shape=model_names, color=model_names)) +
+  geom_point() +
+  geom_line() +
+  ylim(0.6, 1) +
+  facet_wrap(~corpus+language) +
+  ggtitle('Pre-trained (~1000h) Base Wav2vec2.0 model Layerwise Performance')
+```
+
+For the F0 task, both fine-tuned models perform worse than their pre-trained counterparts. This is expecially observable in the mandarin models. Contrasting this finding with the Tone finding above indicates that the Mandarin fine-tuned model is benefitting from lexical information instead of pitch information to classify tone.
+
+## Section 3: Large Models
+
+```{r}
+data.large.pretrained <- data[((data$task == 'tone')|(data$task == 'syllables_accents'))&(data$model_size == 'Large') & (data$model_state == 'Pre-trained'),]
+
+data.large.pretrained %>% ggplot(
+  aes(x=layer, y=score, shape=model_names, color=model_names)) +
+  geom_point() +
+  geom_line() +
+  ylim(0.4, 1) +
+  facet_wrap(~task_name) +
+  ggtitle('Pre-trained (~1000h) Large Wav2vec2.0 model Layerwise Performance')
+
+#data.large.pretrained %>% ggplot(
+#  aes(x=layer, y=score, shape=model_names, color=model_names)) +
+#  geom_point() +
+#  geom_line() +
+#  ylim(0.4, 1) +
+#  facet_wrap(~task_name, nrow=2) +
+#  ggtitle('Pre-trained (~1000h) Base Wav2vec2.0 model Layerwise Performance')
+```
+
+Analogous comparisons with Large models are on the way but have not finished running.
