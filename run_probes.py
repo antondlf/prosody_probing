@@ -23,6 +23,12 @@ import pickle
 import traceback
 
 
+def save_model(model, pickle_path):
+    
+    with open(pickle_path, 'wb') as f:
+        pickle.dump(model, f)
+
+
 def log_cross_validation(scores, log_dir, best_params=None):
     """Assumed to be a dict output of gc.cv_results_
     or cross_validate().scores"""
@@ -30,34 +36,71 @@ def log_cross_validation(scores, log_dir, best_params=None):
     if best_params:
         with open(log_dir / 'best_params.pickle', 'w') as f:
             pickle.dump(best_params, f)
+            
+
+def balance_classes(data, col_name='label'):
+    
+    group = data.groupby(col_name)
+    return group.apply(lambda x: x.sample(group.size().min()).reset_index(drop=True)).reset_index(drop=True)
+            
 
 
-def get_full_dataset(data, root_dir, regression=True, average_feats=False, testing=False):
+def get_full_dataset(
+    data, root_dir, regression=True,
+    testing=False, average_duplicates=False,
+    average=False, balance_classes=False
+    ):
     
     print('Retrieving dataset...')
     feats = list()
     labels = list()
     test_df = pd.DataFrame()
+    
+    if balance_classes:
+        balance_classes(data, col_name='label')             
+        
     #data = data.loc[(data.label != 'sil') & (data.label != 'SIL')]
     for name, group in tqdm(list(data.groupby('file_id'))):
         feat_file = name + '.npy'
         raw_feats = np.load(root_dir / feat_file)
         group.dropna(inplace=True)
         group['start_end_indices'] = group.start_end_indices.map(literal_eval)
-        group = group[group.start_end_indices.map(lambda x: len(x) > 0)]
+        group['label'] = group.label.astype(np.float32)
+        group = group.loc[group.start_end_indices.map(lambda x: len(x) > 0)]
+        if average_duplicates:
+            group['start_end_indices'] = group.start_end_indices.map(lambda x: x[0])
+            group.drop_duplicates(subset=['start_end_indices'], keep='first')
+            
         if len(group) > 0:
-            full_group = group.explode('start_end_indices')
-            indices = full_group.start_end_indices.map(int).to_numpy()            
-            feats.append(raw_feats[indices, :])
+            if average:
+                indices = group.start_end_indices.to_numpy()
+                for index_list in indices:
+                    
+                    feats.append(raw_feats[map(int, index_list), :].mean(axis=0))
+                full_group = group
+            else:
+                full_group = group.explode('start_end_indices')
+                indices = full_group.start_end_indices.map(int).to_numpy()            
+                feats.append(raw_feats[indices, :])
+            
+            # Full group should be the appropriate group in either case:
             if regression:
                 labels.append(full_group.label.astype(np.float32).to_numpy())
             else:
                 labels.append(full_group.label.astype(int).to_numpy())
             if testing:
                 test_df = pd.concat([test_df, full_group])
-        
-    X = np.concatenate(feats, axis=0)    
-    y = np.concatenate(labels)
+    try:    
+        X = np.concatenate(feats, axis=0)    
+        y = np.concatenate(labels)
+    except ValueError:
+        print(group)
+        print(labels)
+        print(indices)
+        print(raw_feats)
+        # halt code because error will be raised later
+        # as a direct result of this exception
+        assert True == False
     if not testing:
         return X, y
     else:
@@ -222,7 +265,7 @@ def train_mlp_classifier(train_data, module,
 def train_regression(train_data, log_dir, cross_validation=True):
 
     X, y = train_data
-    linear_model = LinearRegression()
+    linear_model = LinearRegression(n_jobs=-1)
     if cross_validation:
         cv = cross_validate(linear_model, X, y, scoring=['neg_mean_squared_error', 'r2'], cv=3, verbose=2)
         log_cross_validation(cv, log_dir, best_params=None)
@@ -259,7 +302,7 @@ def train_logistic_classifier(train_data, log_dir, binary=False, cross_validatio
             #'roc': 'roc_auc', not supported for multi class classification
             # There are some workarounds but I am not implementing any.
             'log_loss': 'neg_log_loss'}
-    model = LogisticRegression(penalty='l1', solver='liblinear')
+    model = LogisticRegression(penalty='l1', solver='saga', n_jobs=-1, max_iter=200)
     if cross_validation:
         # instantiate and fit grid search
         gs = GridSearchCV(model, param_grid,
@@ -327,6 +370,12 @@ def main():
     )
     parser.add_argument(
         '--gpu_count', type=int, default=1, help='Number of GPUs to train with'
+    ),
+    parser.add_argument(
+        '--balance_classes', type=bool, default=False, help='Whether to artificially balance class counts'
+    )
+    parser.add_argument(
+        '--mean_pooling', type=bool, default=False, help="Whether to average representations for a given labeled interval."
     )
     
     args = parser.parse_args()
@@ -337,34 +386,58 @@ def main():
     
     """
     
-    #train_test_split
-    log_path = Path(f"logs/{args.corpus_name}/{args.task}/{args.model}/{args.probe}")
+    mean_pooling = args.mean_pooling
+    balance_classes = args.balance_classes
+    # Create different log dirs to keep track of conditions
+    if mean_pooling and balance_classes:
+       log_path = Path(f"logs/mean_balanced/{args.corpus_name}/{args.task}/{args.model}/{args.probe}") 
+    elif mean_pooling:
+        log_path = Path(f"logs/mean/{args.corpus_name}/{args.task}/{args.model}/{args.probe}") 
+    elif balance_classes:
+        log_path = Path(f"logs/balanced/{args.corpus_name}/{args.task}/{args.model}/{args.probe}")
+    else:
+        #train_test_split
+        log_path = Path(f"logs/{args.corpus_name}/{args.task}/{args.model}/{args.probe}")
     os.makedirs(log_path, exist_ok=True)
     
+    
     csv_data = pd.read_csv(args.labels)
+    if args.task == 'stress':
+        stress_category_mapping = {'p': 2, 'n': 1, 's': 1}
+        csv_data['label'] = csv_data.label.map(lambda x: stress_category_mapping.get(x, 'SIL'))
     csv_data['speaker'] = csv_data.file_id.map(lambda x: x.split('_')[0])
     if (args.task != 'f0') and (args.task != 'tone'):
         csv_data = csv_data.loc[(csv_data.label != 'sil') & (csv_data.label != 'SIL')]
     else:
         csv_data = csv_data.loc[(csv_data.label != 0)&(csv_data.label != 'sil')& (csv_data.label != 'SIL')]
-    # Data loading progress bar will look similar for test and train
-    # That is because split is on individual data points
-    # not individual files
+
     train_speakers, test_speakers = train_test_split(csv_data.speaker.unique(), test_size=0.2, random_state=42) #stratify='file_id', but I want to split file ids
     train = csv_data.loc[csv_data.speaker.isin(train_speakers)]
     test = csv_data.loc[csv_data.speaker.isin(test_speakers)]
-    
+
     neural_dim = args.neural_dim
+    
+    average_duplicates = False
     if args.task == 'f0':
         out_dim = 1
         regression = True
+        average_duplicates = True
+        # No classes in regression
+        balance_classes = False
+        
     elif args.task == 'tone':
         out_dim = 5
         regression = False
+        
     else:
-        out_dim = 2
+        out_dim = len(csv_data.label.unique())
         regression = False
-    if args.model in ['wav2vec2-large', 'wav2vec2-xls-r-300m']:
+        
+    if args.model in [
+        'wav2vec2-large', 'wav2vec2-xls-r-300m',
+        'wav2vec2-large-960h', 'wav2vec2-large-xlsr-53',
+        'wav2vec2-large-xlsr-53-chinese-zh-cn'
+        ]:
         neural_dim = 1024
     hidden_dim = args.hidden_dim
     print(f'Probing all {args.layer} layers of {args.model}')
@@ -386,9 +459,15 @@ def main():
         root_dir = args.root_dir / args.model / f'layer-{layer}'
 
             
-        train_set = get_full_dataset(train, root_dir, regression=regression)
+        train_set = get_full_dataset(
+            train, root_dir, 
+            regression=regression,
+            average_duplicates=average_duplicates,
+            average=mean_pooling,
+            balance_classes=balance_classes
+            )
         cv_log_dir = log_path / f"cross_val_results_{layer}.csv"
-        print('Starting training loop...') 
+        print('\nStarting training loop...') 
         if args.probe == 'mlp':
             if regression:
                 model = train_mlp_regressor(train_set, MLPRegressor, cv_log_dir, cross_validation=cross_validation, batch=args.batch_size, input_dim=neural_dim, best_params=best_params)
@@ -401,10 +480,17 @@ def main():
             else:
                 binary = True if args.task != 'tone' else False
                 model = train_logistic_classifier(train_set, cv_log_dir, binary=binary, cross_validation=cross_validation, best_params=best_params)
-        
+        ###################
+        # save_model object
+        save_model(model, log_path / f'layer_{layer}_model.pickle')
+        ###################
         print('Done training!')
         print('Beginning test loop...')
-        test_feats, test_labels, test_df = get_full_dataset(test, root_dir, regression=regression, testing=True)
+        test_feats, test_labels, test_df = get_full_dataset(
+            test, root_dir, regression=regression,
+            testing=True, average_duplicates=average_duplicates,
+            average=mean_pooling
+            )
         y_pred = model.predict(test_feats)
 
         print()
