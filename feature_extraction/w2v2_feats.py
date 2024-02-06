@@ -21,7 +21,9 @@ MODEL_PATH_PREPEND = {
     'wav2vec2-base': 'facebook',
     'mms-300m': 'facebook',
     'mandarin-wav2vec2-aishell1': 'kehanlu',
-    'wav2vec2-base-100h': 'facebook'
+    'wav2vec2-base-100h': 'facebook',
+    'wav2vec2-large-xlsr-53-chinese-zh-cn': 'jonatasgrosman',
+    'wav2vec2-large-960h': 'facebook'
 }
 
 def get_feature_func(model_or_feat, layer=None):
