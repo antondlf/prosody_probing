@@ -20,13 +20,15 @@ TASK_SET = {
      'stress': (SWITCHBOARD_PATH / 'syllables', None, SWITCHBOARD_PATH / 'wav'),
      
      'phonemes': (SWITCHBOARD_PATH / 'phones', None, SWITCHBOARD_PATH / 'wav'),
-     'f0': (SWITCHBOARD_PATH / 'f0', None, SWITCHBOARD_PATH / 'wav')
+     'f0': (SWITCHBOARD_PATH / 'f0', None, SWITCHBOARD_PATH / 'wav'),
+     'energy': (SWITCHBOARD_PATH / 'energy', None, SWITCHBOARD_PATH / 'wav')
     },
     
     'mandarin-timit':
         {
             'tone': (Path('data/mandarin-timit/tone'), None, Path('data/mandarin-timit/wav')),
-            'f0': (Path('data/mandarin-timit/f0'), None, Path('data/mandarin-timit/wav'))
+            'f0': (Path('data/mandarin-timit/f0'), None, Path('data/mandarin-timit/wav')),
+            'energy': (Path('data/mandarin-timit/f0'), None, Path('/data/mandarin-timit/wav'))
         }
 
 }
@@ -105,13 +107,13 @@ def get_neural_indices(annotation_dir, save_dir, wav_dir, accent_dir=None, binar
     for file in tqdm(list(annotation_dir.glob('*.csv'))):
         iter_df = pd.read_csv(file, index_col=0)
         iter_df['file_id'] = file.stem
-        if (annotation_dir.name != 'phones') and (annotation_dir.name != 'f0'):
+        if (annotation_dir.name != 'phones') and (annotation_dir.name not in ['f0', 'energy']):
             # This is super hacky, better to have consistency over 
             # different tasks but for now it will do
             iter_df = derive_silences(iter_df)
         # This format can then be exploded after reading
         #try:
-        if annotation_dir.name == 'f0':
+        if annotation_dir.name in ['f0', 'energy']:
             iter_df['start_end_indices'] = iter_df.start.map(
                 lambda x: \
                     ms2idx(x, step_s=step),
@@ -139,14 +141,14 @@ def get_neural_indices(annotation_dir, save_dir, wav_dir, accent_dir=None, binar
                 lambda x:\
                     find_accent_label(x, accent_file, binary_accent=binary_accent), axis=1
             )
-        # Plus one on upper bound to include last index
-        if annotation_dir.name != 'f0':
+            
+        if annotation_dir.name not in ['f0', 'energy']:
             iter_df['start_end_indices'] = iter_df.start_end_indices.map(lambda x: list(range(int(x[0]), int(x[1]))))
         
         # Avoid off by one error by calculating the amount of sample outputs
         # And removing one sample if necessary
         file_sample_length = sf.read(wav_dir / f"{file.stem}.wav")[0].shape[0]
-        if annotation_dir.name == 'f0':
+        if annotation_dir.name in ['f0', 'energy']:
             last_index = iter_df.iloc[-1, -1]
         else: 
             try:
@@ -177,7 +179,7 @@ def get_neural_indices(annotation_dir, save_dir, wav_dir, accent_dir=None, binar
                 if last_index == frame_length:
                     iter_df.iloc[-1, -1].append(iter_df.iloc[-1, -1][-1] + 1)       
                 else:
-                    if annotation_dir.name != 'f0':
+                    if annotation_dir.name not in ['f0', 'energy']:
                         iter_df.loc[iter_df.index[-1]+1] = {
                             'start': iter_df.iloc[-1, 1],
                             'end': librosa.get_duration(path=wav_dir / f"{file.stem}.wav"),
@@ -195,7 +197,7 @@ def get_neural_indices(annotation_dir, save_dir, wav_dir, accent_dir=None, binar
                             } 
                     
         # and at the end
-        if annotation_dir == 'f0':
+        if annotation_dir in ['f0', 'energy']:
             first_index = iter_df.iloc[0, -1]
         else:
             try:
@@ -234,24 +236,34 @@ def get_neural_indices(annotation_dir, save_dir, wav_dir, accent_dir=None, binar
     experiment_df.to_csv(save_dir/f'{annotation_domain}{accent_labels}{binary_accent}.csv', index=False,  float_format='%.3f')   
     shutil.rmtree(tmp_dir)
         
-def create_task_datasets(task_set, save_dir):
+def create_task_datasets(task_set, save_dir, include=None):
     
     for key, (feat_dir_value, accent_dir_value, wav_dir_value) in task_set.items():
-        
-        has_accent = 'with' if accent_dir_value is not None else 'without'
-        print(f'Creating task for {feat_dir_value.stem} {has_accent} accent values...')
-        if accent_dir_value is not None:
-            for binary_accent in [True, False]:
-                get_neural_indices(feat_dir_value, save_dir, wav_dir_value, accent_dir=accent_dir_value, binary_accent=binary_accent)
+        if include is None:      
+            has_accent = 'with' if accent_dir_value is not None else 'without'
+            print(f'Creating task for {feat_dir_value.stem} {has_accent} accent values...')
+            if accent_dir_value is not None:
+                for binary_accent in [True, False]:
+                    get_neural_indices(feat_dir_value, save_dir, wav_dir_value, accent_dir=accent_dir_value, binary_accent=binary_accent)
+            else:
+                get_neural_indices(feat_dir_value, save_dir, wav_dir_value, accent_dir=accent_dir_value)
         else:
-            get_neural_indices(feat_dir_value, save_dir, wav_dir_value, accent_dir=accent_dir_value)
+            if key in include:
+                has_accent = 'with' if accent_dir_value is not None else 'without'
+                print(f'Creating task for {feat_dir_value.stem} {has_accent} accent values...')
+                if accent_dir_value is not None:
+                    for binary_accent in [True, False]:
+                        get_neural_indices(feat_dir_value, save_dir, wav_dir_value, accent_dir=accent_dir_value, binary_accent=binary_accent)
+                else:
+                    get_neural_indices(feat_dir_value, save_dir, wav_dir_value, accent_dir=accent_dir_value) 
 
 
 if __name__ == '__main__':
+    include = ['energy']
     for corpus, task_set in TASK_SET.items():
         save_dir = Path(f'data/{corpus}/aligned_tasks')
         os.makedirs(save_dir, exist_ok=True)
-        create_task_datasets(task_set, save_dir)
+        create_task_datasets(task_set, save_dir, include=include)
     #get_neural_indices(Path('data/switchboard/phones'), accent_dir=Path('data/switchbaord/accents'))
 ## Figure out how to map so that either it works with a dataloader
 ## Or I can mask out necessary tokens without recomputing every iteration
