@@ -29,16 +29,17 @@ def get_f0(path):
     
     return downsample_time, mean_frequency
 
+
 def get_energy(path, match_w2v2=True):
 
-    _sr, audio = wavfile.read(path)
+    sr, audio = wavfile.read(path)
     if match_w2v2:
         rms_values = rms(y=audio, frame_length=400, hop_length=320)
-        times = times_like(rms_values)
-        return times, rms_values
+        times = times_like(rms_values, sr=sr)
+        return times, rms_values[0]
     else:
         rms_values = rms(y=audio)
-        return times_like(rms_values), rms_values
+        return times_like(rms_values, sr=sr), rms_values[0]
         
 
 def get_fbank(path, nbins=80):
@@ -87,10 +88,10 @@ def main():
         wav_path = Path(f'data/{corpus}/wav')
         
         for file in tqdm(list(wav_path.glob('*.wav'))):
-            time, pitch_energy = get_pitch_energy(str(file))
+            time, energy = get_energy(str(file))
             filename = file.name.replace('.wav', '.csv')
-            os.makedirs(f'data/{corpus}/pitch_energy', exist_ok=True)
-            pd.DataFrame({'start': time, 'file_id': [file.stem]*len(time), 'label': pitch_energy}).to_csv(f'data/{corpus}/pitch_energy/{filename}')
+            os.makedirs(f'data/{corpus}/energy', exist_ok=True)
+            pd.DataFrame({'start': time, 'file_id': [file.stem]*len(time), 'label': energy}).to_csv(f'data/{corpus}/energy/{filename}')
            
            
 if __name__ == '__main__':
