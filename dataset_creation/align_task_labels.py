@@ -259,7 +259,7 @@ def create_task_datasets(task_set, save_dir, include=None):
 
 
 if __name__ == '__main__':
-    include = ['energy']
+    include = None#['energy']
     for corpus, task_set in TASK_SET.items():
         save_dir = Path(f'data/{corpus}/aligned_tasks')
         os.makedirs(save_dir, exist_ok=True)
