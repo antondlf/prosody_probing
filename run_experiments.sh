@@ -54,27 +54,17 @@ if [ $stage -le 1 ]; then
          [ $model == "wav2vec2-large-xlsr-53" ] || [ $model == "wav2vec2-large-xlsr-53-chinese-zh-cn" ] ||\
           [ $model == "wav2vec2-large-960h" ]; then
           layer=24
-        elif [ $model == "fbank" ] || [ $model == "mfcc" ]; then
+        elif [ $model == "fbank" ] || [ $model == "mfcc" ] || [ $model == "pitch" ]; then
           layer=0
         else
           layer=12
         fi
     for corpus in $CORPORA; do
         if [ $corpus == 'mandarin-timit' ]; then #&& [ [ $model == 'wav2vec2-large' ] || [ $model == 'wav2vec2-xls-r-300m' ] ]; then
-          if [ $model == 'wav2vec2-base' ] || [ $model == 'mandarin-wav2vec2' ]; then
-            continue
-          else
-            FEATURES="tone f0"
-          fi
+            FEATURES="tone energy"
         
         elif [ $corpus == 'switchboard' ]; then
-          if [ $model == 'wav2vec2-base' ] || [ $model == 'mandarin-wav2vec2' ]; then
-            FEATURES="stress"
-        #elif [ $model == 'wav2vec2-base' ]; then
-        #  FEATURES=""
-          else
-            FEATURES="syllables_accents f0 stress"
-          fi
+            FEATURES="syllables_accents stress energy"
 
         fi
         for feature in $FEATURES; do
@@ -84,7 +74,7 @@ if [ $stage -le 1 ]; then
 
           echo "Probing $model with $probe for $layer layers" >> logs/${model}_${feature}.stdout
               python3 run_probes.py $model $layer -l data/$corpus/aligned_tasks/${feature}.csv \
-             -d data/feats/$corpus -c $corpus -t $feature -r True -p $probe --gpu_count $gpu
+             -d data/feats/$corpus -c $corpus -t $feature -r True -p $probe --gpu_count $gpu --mean_pooling True
                   >> logs/${model}_${feature}_${corpus}_${probe}.stdout \
                   2>> logs/${model}_${feature}_${corpus}_${probe}.stderr &
     	  wait

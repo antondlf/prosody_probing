@@ -189,8 +189,9 @@ def get_result_df(log_root, metric_mapping, save_path):
         'wav2vec2-base-100h': 'English Finetuned',
         'wav2vec2-large': 'English Large',
         'wav2vec2-large-960h': 'English Large Finetunted',
-        'wav2vec2-xls-r-300m': 'Multilingual Large 300m',
+        'wav2vec2-xls-r-300m': 'Multilingual Large 128',
         'wav2vec2-large-xlsr-53': 'Multilingual Large 53',
+        'wav2vec2-large-xlsr-53-chinese-zh-cn': 'Multilingual Large 53 Finetuned',
         'fbank': 'Mel-Filterbank',
         'mfcc': 'MFCC'
     }
@@ -310,11 +311,11 @@ if __name__ == '__main__':
         'phones_accents': 'f1_score',
         'stress': 'f1_score'
     }
-    save_path = 'full_results.csv'
-    get_result_df(Path('logs_02-05-2024/logs'), metric_mapping, save_path)
+    save_path = 'results/full_results.csv'
+    get_result_df(Path('results/logs_02-05-2024/logs'), metric_mapping, save_path)
     
     
-    save_alternative = 'full_results_alternative.csv'
+    save_alternative = 'results/full_results_alternative.csv'
     alternative_mapping = {
         'f0': 'mean_squared_error',
         'tone': 'log_loss',
@@ -324,6 +325,6 @@ if __name__ == '__main__':
         'stress': 'log_loss'
     }
     
-    get_result_df(Path('logs_02-05-2024/logs'), alternative_mapping, save_alternative)
+    get_result_df(Path('results/logs_02-05-2024/logs'), alternative_mapping, save_alternative)
     
         

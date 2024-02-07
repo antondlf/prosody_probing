@@ -13,7 +13,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 library(ggplot2)
 library(dplyr)
-data <- read.csv('full_results.csv')
+data <- read.csv('../results/full_results.csv')
 factor.cols <- c("model", "model_names", "model_state", "model_size", "language", "probe", "task", "corpus", "task_name")
 num.cols <- c("score")
 int.cols <- c("layer")
@@ -21,7 +21,27 @@ data[factor.cols] <- lapply(data[factor.cols], as.factor)
 data[num.cols] <- lapply(data[num.cols], as.numeric)
 data[int.cols] <- lapply(data[int.cols], as.integer)
 
-data_target_loss <- read.csv('full_results_alternative.csv')
+layer_sizes <- c("12", "24", "0")
+names(layer_sizes) <- c("Base", "Large", "Baseline")
+layer_sizes['Base']
+
+get_model_size <- function(string){
+  if (string == 'Base'){
+    return(12)
+  }
+  else if (string == 'Large'){
+    return(24)
+  }
+  else{
+    return(0)
+  }
+  }
+
+data["max_layer"] <- sapply(data$model_size, get_model_size)
+
+data['model_percent'] <- data$layer / data$max_layer
+
+data_target_loss <- read.csv('../results/full_results_alternative.csv')
 data_target_loss[factor.cols] <- lapply(data_target_loss[factor.cols], as.factor)
 data_target_loss[num.cols] <- lapply(data_target_loss[num.cols], as.numeric)
 
@@ -39,8 +59,9 @@ data.base.pretrained %>% ggplot(
   geom_point() +
   geom_line() +
   ylim(0.5, 1) +
-  facet_wrap(~task_name) +
-  ggtitle('Pre-trained (~1000h) Base Wav2vec2.0 model Layerwise Performance')
+  facet_wrap(~task_name)
+  #ggtitle('Pre-trained (~1000h) Base Wav2vec2.0 model Layerwise Performance')
+  ggsave("../results/plots/accent_tone_comparison.png")
 
 data.base.pretrained %>% ggplot(
   aes(x=layer, y=score, shape=model_names, color=model_names)) +
@@ -63,8 +84,9 @@ data.base.pretrained.f0 %>% ggplot(
   geom_point() +
   geom_line() +
   ylim(0.6, 1) +
-  facet_wrap(~corpus) +
-  ggtitle('Pre-trained (~1000h) Base Wav2vec2.0 model Layerwise Performance')
+  facet_wrap(~corpus) 
+  #ggtitle('Pre-trained (~1000h) Base Wav2vec2.0 model Layerwise Performance')
+  ggsave("../results/plots/f0_results.png")
 
 #data.base.pretrained.f0 %>% ggplot(
 #  aes(x=layer, y=score, shape=model_names, color=model_names)) +
@@ -80,15 +102,16 @@ This figure shows that the performance on Lexical Tone and English Phrasal Pitch
 ## Section 2.1: Stress vs. Tone
 
 ```{r}
-data.base.pretrained.stress <- data[((data$task == 'stress') | (data$task == 'tone') | (data$task == 'syllables_accents'))&((data$model == 'wav2vec2-base') | (data$model == 'mandarin-wav2vec2')),]
+data.base.pretrained.stress <- data[((data$task == 'stress') | (data$task == 'tone'))&((data$model == 'wav2vec2-base') | (data$model == 'mandarin-wav2vec2')),]
 
 data.base.pretrained.stress %>% ggplot(
   aes(x=layer, y=score, shape=model_names, color=model_names)) +
   geom_point() +
   geom_line() +
   #ylim(0.6, 1) +
-  facet_wrap(~task_name) +
-  ggtitle('Pre-trained (~1000h) Base Wav2vec2.0 model Layerwise Performance')
+  facet_wrap(~task_name) #+
+  #ggtitle('Pre-trained (~1000h) Base Wav2vec2.0 model Layerwise Performance')
+  ggsave("../results/plots/stress_tone_comparison.png")
 ```
 
 
@@ -104,8 +127,9 @@ finetune.comparison.mandarin %>% ggplot(
   geom_point() +
   geom_line() +
   ylim(0.5, 1) +
-  facet_wrap(~task_name) +
-  ggtitle('Pre-trained (~1000h) vs. Fine-tuned (~100h) Mandarin Wav2vec2.0 Base Models')
+  facet_wrap(~task_name) #+
+  #ggtitle('Pre-trained (~1000h) vs. Fine-tuned (~100h) Mandarin Wav2vec2.0 Base Models')
+  ggsave("../results/plots/mandarin_fine_tuned.png")
 
 #finetune.comparison.mandarin %>% ggplot(
 #  aes(x=layer, y=score, shape=model_names, color=model_names)) +
@@ -114,6 +138,18 @@ finetune.comparison.mandarin %>% ggplot(
 #  ylim(0.5, 1) +
 #  facet_wrap(~task_name, nrow=2) +
 #  ggtitle('Pre-trained (~1000h) vs. Fine-tuned (~100h) Mandarin Wav2vec2.0 Base Models')
+```
+```{r}
+finetune.comparison.all <- data[((data$task == 'tone')|(data$task == 'syllables_accents')|(data$task == 'f0'))&(data$model_size == 'Base')&(data$model_state=='Pre-trained'),]
+#data.tone.base.pretrained <- data[(data$task == 'tone')&((data$model == 'wav2vec2-base-100h') | (data$model == 'mandarin-wav2vec2-aishell1')),] 
+finetune.comparison.all %>% ggplot(
+  aes(x=layer, y=score, shape=model_names, color=model_names)) +
+  geom_point() +
+  geom_line() +
+  ylim(0.5, 1) +
+  facet_wrap(~task_name+corpus) #+
+  #ggtitle('Pre-trained (~1000h) vs. Fine-tuned (~100h) Mandarin Wav2vec2.0 Base Models')
+  ggsave("../results/plots/f0_underlying_comparison.png")
 ```
 
 There is also an effect of fine tuning on later layer encoding of Tone for the Mandarin model. When fine tuned on 175h of Aishell1, the model performs better than its pre-trained counterpart on Tone classification. This is not observable, or at least not as clearly, in the English phrasal accent case. There is a clear effect of fine-tuning on Tone recognition for the mandarin-trained model. After Fine-tuning on \~175 hours of Aishell 1 data the mandarin model becomes better at tone recognition in the Mandarin dataset. The same is not observable for English pitch accents, though there is a slight improvement in performance in the last two layers.
@@ -128,8 +164,9 @@ finetune.comparison.english %>% ggplot(
   geom_point() +
   geom_line() +
   ylim(0.4, 1) +
-  facet_wrap(~task_name) +
-  ggtitle('Pre-trained (~1000h) vs. Fine-tuned (~100h) Mandarin Wav2vec2.0 Base Models')
+  facet_wrap(~task_name) #+
+  #ggtitle('Pre-trained (~1000h) vs. Fine-tuned (~100h) Mandarin Wav2vec2.0 Base Models')
+ggsave("../results/plots/english_fine_tuning_comparison.png")
 
 #finetune.comparison.english %>% ggplot(
 #  aes(x=layer, y=score, shape=model_names, color=model_names)) +
@@ -152,24 +189,49 @@ data.base.pretrained.f0.mandarin %>% ggplot(
   geom_point() +
   geom_line() +
   ylim(0.6, 1) +
-  facet_wrap(~corpus+language) +
-  ggtitle('Pre-trained (~1000h) Base Wav2vec2.0 model Layerwise Performance')
+  facet_wrap(~corpus+language) #+
+  #ggtitle('Pre-trained (~1000h) Base Wav2vec2.0 model Layerwise Performance')
+ggsave("../results/plots/fine_tuning_f0.png")
 ```
 
 For the F0 task, both fine-tuned models perform worse than their pre-trained counterparts. This is expecially observable in the mandarin models. Contrasting this finding with the Tone finding above indicates that the Mandarin fine-tuned model is benefitting from lexical information instead of pitch information to classify tone.
+```{r}
+data.base.english <- data[((data$task == 'tone')|(data$task == 'syllables_accents')|(data$task=='f0'))&(data$model_size == 'Base')&(data$language=='English'),]
+data.base.english$corpus_f <- factor(data.base.english$corpus, levels=c('switchboard', 'mandarin-timit'))
+data.base.english %>% ggplot(
+  aes(x=layer, y=score, shape=model_names, color=model_names)) +
+  geom_point() +
+  geom_line() +
+  #ylim(0.6, 1) +
+  facet_wrap(~task_name+corpus_f) #+
+  #ggtitle('Pre-trained (~1000h) Base Wav2vec2.0 model Layerwise Performance')
+ggsave("../results/plots/fine_tuning_classification.png")
+```
 
 ## Section 3: Large Models
 
 ```{r}
-data.large.pretrained <- data[((data$task == 'tone')|(data$task == 'syllables_accents'))&(data$model_size == 'Large') & (data$model_state == 'Pre-trained'),]
+data.large.pretrained <- data[((data$task == 'tone')|(data$task == 'syllables_accents'))&(data$model_size == 'Large')&(data$model_state=='Pre-trained'),]
+data.large.f0.pretrained <- data[(data$task == 'f0')&(data$model_size == 'Large')&(data$model_state=='Pre-trained'),]
 
 data.large.pretrained %>% ggplot(
   aes(x=layer, y=score, shape=model_names, color=model_names)) +
   geom_point() +
   geom_line() +
-  ylim(0.4, 1) +
-  facet_wrap(~task_name) +
-  ggtitle('Pre-trained (~1000h) Large Wav2vec2.0 model Layerwise Performance')
+  #ylim(0.4, 1) +
+  facet_wrap(~task_name) #+
+  #ggtitle('Pre-trained (~1000h) Large Wav2vec2.0 model Layerwise Performance')
+  ggsave("../results/plots/large_pretrained_underlying.png")
+  
+
+data.large.f0.pretrained %>% ggplot(
+  aes(x=layer, y=score, shape=model_names, color=model_names)) +
+  geom_point() +
+  geom_line() +
+  #ylim(0.4, 1) +
+  facet_wrap(~corpus) #+
+  #ggtitle('Pre-trained (~1000h) Large Wav2vec2.0 model Layerwise Performance')
+  ggsave("../results/plots/large_pretrained_f0.png")
 
 #data.large.pretrained %>% ggplot(
 #  aes(x=layer, y=score, shape=model_names, color=model_names)) +
@@ -178,6 +240,30 @@ data.large.pretrained %>% ggplot(
 #  ylim(0.4, 1) +
 #  facet_wrap(~task_name, nrow=2) +
 #  ggtitle('Pre-trained (~1000h) Base Wav2vec2.0 model Layerwise Performance')
+```
+```{r}
+data.base.large.f0<- data[(data$task == 'f0')&(data$model_size == 'Large'),]
+
+data.base.large.f0 %>% ggplot(
+  aes(x=layer, y=score, shape=model_names, color=model_names)) +
+  geom_point() +
+  geom_line() +
+  ylim(0.6, 1) +
+  facet_wrap(~corpus+language) #+
+  #ggtitle('Pre-trained (~1000h) Base Wav2vec2.0 model Layerwise Performance')
+ggsave("../results/plots/large_fine_tuning_f0.png")
+```
+```{r}
+data.base.large.f0<- data[(data$task=='stress')&(data$model_size != 'Baseline')&(data$corpus == 'switchboard'),]
+#((data$task == 'syllables_accents')|(data$task == 'tone'))&
+data.base.large.f0 %>% ggplot(
+  aes(x=model_percent, y=score, shape=task, color=task)) +
+  geom_point() +
+  geom_line() +
+  #ylim(0.6, 1) +
+  facet_wrap(~model) #+
+  #ggtitle('Pre-trained (~1000h) Base Wav2vec2.0 model Layerwise Performance')
+ggsave("../results/plots/large_fine_tuning_f0.png")
 ```
 
 Analogous comparisons with Large models are on the way but have not finished running.

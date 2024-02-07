@@ -38,17 +38,18 @@ def log_cross_validation(scores, log_dir, best_params=None):
             pickle.dump(best_params, f)
             
 
-def balance_classes(data, col_name='label'):
+def balance_classes(data, col_name='label', random_state=None):
     
     group = data.groupby(col_name)
-    return group.apply(lambda x: x.sample(group.size().min()).reset_index(drop=True)).reset_index(drop=True)
+    return group.apply(lambda x: x.sample(group.size().min(), random_seed=random_state).reset_index(drop=True)).reset_index(drop=True)
             
 
 
 def get_full_dataset(
     data, root_dir, regression=True,
     testing=False, average_duplicates=False,
-    average=False, balance_classes=False
+    average=False, balance_classes=False,
+    random_state=42
     ):
     
     print('Retrieving dataset...')
@@ -57,12 +58,13 @@ def get_full_dataset(
     test_df = pd.DataFrame()
     
     if balance_classes:
-        balance_classes(data, col_name='label')             
+        balance_classes(data, col_name='label', random_state=random_state)             
         
     #data = data.loc[(data.label != 'sil') & (data.label != 'SIL')]
     for name, group in tqdm(list(data.groupby('file_id'))):
         feat_file = name + '.npy'
         raw_feats = np.load(root_dir / feat_file)
+        feat_dim = raw_feats.shape[-1]
         group.dropna(inplace=True)
         group['start_end_indices'] = group.start_end_indices.map(literal_eval)
         group['label'] = group.label.astype(np.float32)
@@ -75,8 +77,8 @@ def get_full_dataset(
             if average:
                 indices = group.start_end_indices.to_numpy()
                 for index_list in indices:
-                    
-                    feats.append(raw_feats[map(int, index_list), :].mean(axis=0))
+                    int_indices = list(map(int, index_list))
+                    feats.append(raw_feats[int_indices, :].mean(axis=0).reshape(1, feat_dim))
                 full_group = group
             else:
                 full_group = group.explode('start_end_indices')
@@ -377,6 +379,9 @@ def main():
     parser.add_argument(
         '--mean_pooling', type=bool, default=False, help="Whether to average representations for a given labeled interval."
     )
+    parser.add_argument(
+        '--random_seed', type=int, default=42, help='Random seed for reproducibility'
+    )
     
     args = parser.parse_args()
     
@@ -388,6 +393,7 @@ def main():
     
     mean_pooling = args.mean_pooling
     balance_classes = args.balance_classes
+    seed = args.random_seed
     # Create different log dirs to keep track of conditions
     if mean_pooling and balance_classes:
        log_path = Path(f"logs/mean_balanced/{args.corpus_name}/{args.task}/{args.model}/{args.probe}") 
@@ -400,7 +406,6 @@ def main():
         log_path = Path(f"logs/{args.corpus_name}/{args.task}/{args.model}/{args.probe}")
     os.makedirs(log_path, exist_ok=True)
     
-    
     csv_data = pd.read_csv(args.labels)
     if args.task == 'stress':
         stress_category_mapping = {'p': 2, 'n': 1, 's': 1}
@@ -411,7 +416,7 @@ def main():
     else:
         csv_data = csv_data.loc[(csv_data.label != 0)&(csv_data.label != 'sil')& (csv_data.label != 'SIL')]
 
-    train_speakers, test_speakers = train_test_split(csv_data.speaker.unique(), test_size=0.2, random_state=42) #stratify='file_id', but I want to split file ids
+    train_speakers, test_speakers = train_test_split(csv_data.speaker.unique(), test_size=0.2, random_state=seed) #stratify='file_id', but I want to split file ids
     train = csv_data.loc[csv_data.speaker.isin(train_speakers)]
     test = csv_data.loc[csv_data.speaker.isin(test_speakers)]
 
@@ -470,9 +475,17 @@ def main():
         print('\nStarting training loop...') 
         if args.probe == 'mlp':
             if regression:
-                model = train_mlp_regressor(train_set, MLPRegressor, cv_log_dir, cross_validation=cross_validation, batch=args.batch_size, input_dim=neural_dim, best_params=best_params)
+                model = train_mlp_regressor(train_set, MLPRegressor, cv_log_dir,
+                                            cross_validation=cross_validation, batch=args.batch_size,
+                                            input_dim=neural_dim, best_params=best_params,
+                                            random_state=seed
+                                            )
             else:
-                model = train_mlp_classifier(train_set, MLPClassifier, cv_log_dir, out_dim=out_dim, cross_validation=cross_validation, batch=args.batch_size, input_dim=neural_dim, best_params=best_params)
+                model = train_mlp_classifier(train_set, MLPClassifier, cv_log_dir, 
+                                             out_dim=out_dim, cross_validation=cross_validation,
+                                             batch=args.batch_size, input_dim=neural_dim, best_params=best_params,
+                                             random_state=seed
+                                             )
         else:
             if regression:
                 #LogisticRegression()
