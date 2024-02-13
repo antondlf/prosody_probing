@@ -8,11 +8,12 @@ echo $current_path
 DATA_DIR="$current_path/../../data/"
 FEATS_DIR="$DATA_DIR/feats/"
 #MODEL_NAMES="wav2vec2-large-robust"
-MODEL_NAMES="wav2vec2-base mandarin-wav2vec2 wav2vec2-base-100h mandarin-wav2vec2-aishell1"
+MODEL_NAMES="wavlm-base hubert-base-ls960"
 LAYER="all"
 PROBES=$2
-CORPORA="mandarin-timit switchboard"
-FEATURES="energy" #stress syllables_accents f0"
+CORPORA="mandarin-timit"
+#FEATURES="tone f0 energy"
+FEATURES="energy f0"
 ##############################################################################
 # Configuration
 ##############################################################################
@@ -61,10 +62,10 @@ if [ $stage -le 1 ]; then
         fi
     for corpus in $CORPORA; do
         if [ $corpus == 'mandarin-timit' ]; then #&& [ [ $model == 'wav2vec2-large' ] || [ $model == 'wav2vec2-xls-r-300m' ] ]; then
-            FEATURES="energy"
+            FEATURES="tone energy f0"
         
         elif [ $corpus == 'switchboard' ]; then
-            FEATURES="energy"
+            FEATURES="syllables_accents stress energy f0"
 
         fi
         for feature in $FEATURES; do
@@ -74,7 +75,7 @@ if [ $stage -le 1 ]; then
 
           echo "Probing $model with $probe for $layer layers" >> logs/${model}_${feature}.stdout
               python3 run_probes.py $model $layer -l data/$corpus/aligned_tasks/${feature}.csv \
-             -d data/feats/$corpus -c $corpus -t $feature -r True -p $probe #--gpu_count #$gpu #$3
+             -d data/feats/$corpus -c $corpus -t $feature -r True -p $probe --gpu_count $gpu $3
                   >> logs/${model}_${feature}_${corpus}_${probe}.stdout \
                   2>> logs/${model}_${feature}_${corpus}_${probe}.stderr &
     	  wait

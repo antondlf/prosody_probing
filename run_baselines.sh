@@ -8,11 +8,11 @@ echo $current_path
 DATA_DIR="$current_path/../../data/"
 FEATS_DIR="$DATA_DIR/feats/"
 #MODEL_NAMES="wav2vec2-large-robust"
-MODEL_NAMES="wav2vec2-base mandarin-wav2vec2 wav2vec2-base-100h mandarin-wav2vec2-aishell1"
+MODEL_NAMES="mfcc fbank pitch energy pitch_energy"
 LAYER="all"
 PROBES=$2
 CORPORA="mandarin-timit switchboard"
-FEATURES="energy" #stress syllables_accents f0"
+FEATURES="stress syllables_accents"
 ##############################################################################
 # Configuration
 ##############################################################################
@@ -28,11 +28,7 @@ mkdir -p logs/
 if [ $stage -le 0 ]; then
   for corpus in $CORPORA; do
 	for model in $MODEL_NAMES; do
-    if [ $model == 'fbank' ] || [ $model == "mfcc" ]; then
       python3 feature_extraction/w2v2_feats.py $model 0 data/$corpus/wav -c $corpus 
-    else
-		  python3 feature_extraction/w2v2_feats.py $model 'None' data/$corpus/wav -c $corpus
-    fi
 	done
     done
 
@@ -60,21 +56,16 @@ if [ $stage -le 1 ]; then
           layer=12
         fi
     for corpus in $CORPORA; do
-        if [ $corpus == 'mandarin-timit' ]; then #&& [ [ $model == 'wav2vec2-large' ] || [ $model == 'wav2vec2-xls-r-300m' ] ]; then
-            FEATURES="energy"
-        
-        elif [ $corpus == 'switchboard' ]; then
-            FEATURES="energy"
-
-        fi
+        if [ $corpus == 'mandarin-timit' ]; then
+            FEATURES="tone"
         for feature in $FEATURES; do
           echo "Processing $feature from $model for $corpus"
 
           echo "$0: Running classification experiments..."
 
-          echo "Probing $model with $probe for $layer layers" >> logs/${model}_${feature}.stdout
-              python3 run_probes.py $model $layer -l data/$corpus/aligned_tasks/${feature}.csv \
-             -d data/feats/$corpus -c $corpus -t $feature -r True -p $probe #--gpu_count #$gpu #$3
+          python3 "Probing $model with $probe for $layer layers" >> logs/${model}_${feature}.stdout
+              echo run_probes.py $model $layer -l data/$corpus/aligned_tasks/${feature}.csv \
+             -d data/feats/$corpus -c $corpus -t $feature -r True -p $probe --gpu_count $gpu $3
                   >> logs/${model}_${feature}_${corpus}_${probe}.stdout \
                   2>> logs/${model}_${feature}_${corpus}_${probe}.stderr &
     	  wait
