@@ -35,7 +35,7 @@ def get_energy(path, match_w2v2=True):
     sr, audio = wavfile.read(path)
     if match_w2v2:
         rms_values = rms(y=audio, frame_length=400, hop_length=320)
-        times = times_like(rms_values, sr=sr)
+        times = times_like(rms_values, sr=sr, hop_length=320)
         return times, rms_values[0]
     else:
         rms_values = rms(y=audio)
@@ -84,14 +84,14 @@ def get_pitch_energy(path):
 
 def main():
     
-    for corpus in ['switchboard', 'mandarin-timit']:
+    for corpus in ['mandarin-timit']: #, switchboard]:
         wav_path = Path(f'data/{corpus}/wav')
         
         for file in tqdm(list(wav_path.glob('*.wav'))):
-            time, energy = get_energy(str(file))
+            time, energy = get_energy(str(file), match_w2v2=True)
             filename = file.name.replace('.wav', '.csv')
             os.makedirs(f'data/{corpus}/energy', exist_ok=True)
-            pd.DataFrame({'start': time, 'file_id': [file.stem]*len(time), 'label': energy}).to_csv(f'data/{corpus}/energy/{filename}')
+            pd.DataFrame({'start': time, 'file_id': [file.name.replace('.wav', '')]*len(time), 'label': energy}).to_csv(f'data/{corpus}/energy/{filename}')
            
            
 if __name__ == '__main__':

@@ -7,6 +7,8 @@ import os
 import shutil
 import math
 import librosa
+import torch.multiprocessing
+torch.multiprocessing.set_sharing_strategy('file_system')
 
 SWITCHBOARD_PATH = Path('data/switchboard')
 
@@ -28,7 +30,7 @@ TASK_SET = {
         {
             'tone': (Path('data/mandarin-timit/tone'), None, Path('data/mandarin-timit/wav')),
             'f0': (Path('data/mandarin-timit/f0'), None, Path('data/mandarin-timit/wav')),
-            'energy': (Path('data/mandarin-timit/f0'), None, Path('/data/mandarin-timit/wav'))
+            'energy': (Path('data/mandarin-timit/energy'), None, Path('data/mandarin-timit/wav'))
         }
 
 }
@@ -116,7 +118,7 @@ def get_neural_indices(annotation_dir, save_dir, wav_dir, accent_dir=None, binar
         if annotation_dir.name in ['f0', 'energy']:
             iter_df['start_end_indices'] = iter_df.start.map(
                 lambda x: \
-                    ms2idx(x, step_s=step),
+                    ms2idx(x, step_s=step)
                     
             )
         else:
@@ -141,7 +143,7 @@ def get_neural_indices(annotation_dir, save_dir, wav_dir, accent_dir=None, binar
                 lambda x:\
                     find_accent_label(x, accent_file, binary_accent=binary_accent), axis=1
             )
-            
+        # Refactor all of these checks into two separate functions.
         if annotation_dir.name not in ['f0', 'energy']:
             iter_df['start_end_indices'] = iter_df.start_end_indices.map(lambda x: list(range(int(x[0]), int(x[1]))))
         
@@ -158,14 +160,22 @@ def get_neural_indices(annotation_dir, save_dir, wav_dir, accent_dir=None, binar
                 last_index = iter_df.iloc[-1, -1][-1]
             
         frame_length = get_frames_from_samples(file_sample_length)
-        if file.stem == 'sw4150A_t21':
+        if file.stem == 'SP01_112':
             print()
-            
-        # Make sure all indices are accounted for at the beginning
+        
+        # Make sure all indices are accounted for at the end
         if last_index != frame_length - 1:
             if last_index > frame_length - 1:
                 if last_index == frame_length: 
-                    iter_df.at[iter_df.index[-1], 'start_end_indices'] = iter_df.iloc[-1, -1][:-1]
+                    if annotation_dir.name in ['f0', 'energy']:
+                        while frame_length-1 < iter_df.iloc[-1, -1]:
+                            iter_df = iter_df.iloc[:-1]
+                    else:
+                        iter_df.at[iter_df.index[-1], 'start_end_indices'] = iter_df.iloc[-1, -1][:-1]
+                elif type(iter_df.iloc[-1, -1]) != list:
+                    while frame_length-1 < iter_df.iloc[-1, -1]:
+                        iter_df = iter_df.iloc[:-1]
+                    
                 elif frame_length-1 in iter_df.iloc[-1, -1]:
                     index_list = iter_df.iloc[-1, -1]
                     iter_df.at[iter_df.index[-1], 'start_end_indices'] = index_list[:index_list.index(frame_length-1)+1]
@@ -196,30 +206,33 @@ def get_neural_indices(annotation_dir, save_dir, wav_dir, accent_dir=None, binar
                             'start_end_indices': iter_df.iloc[-1, -1][-1]+1
                             } 
                     
-        # and at the end
-        if annotation_dir in ['f0', 'energy']:
+        # and at the beginning
+        # We don't care if the regression tasks start at 1
+        # or at 0 index, it's okay to throw one away.
+        if annotation_dir.name in ['f0', 'energy']:
             first_index = iter_df.iloc[0, -1]
         else:
             try:
                 first_index = iter_df.iloc[0, -1][0]
             except IndexError:
                 first_index = iter_df.iloc[1, -1][0]
-        if first_index > 0:
+            if first_index > 0:
+                
+                iter_df = pd.concat([
+                    pd.DataFrame({
+                    'start': 0, 'end': iter_df.iloc[0, 0], 'label': 'sil', 
+                    'file_id': file.stem, 'start_end_indices': list(range(0, iter_df.iloc[0, -1][0]))
+                    }), iter_df])
             
-            iter_df = pd.concat([
-                pd.DataFrame({
-                'start': 0, 'end': iter_df.iloc[0, 0], 'label': 'sil', 
-                'file_id': file.stem, 'start_end_indices': list(range(0, iter_df.iloc[0, -1][0]))
-                }), iter_df])
-            
-            
-        try:
-            if iter_df.iloc[-1, -1][-1] != frame_length -1:
-                raise AssertionError("Somethings up! Neural frame length does not align with last index")  
-        except IndexError:
-            iter_df = iter_df[:-1]
-            if iter_df.iloc[-1, -1][-1] != frame_length -1:
-                raise AssertionError("Somethings up! Neural frame length does not align with last index")
+        if annotation_dir.name not in ['f0', 'energy']:
+                
+            try:
+                if iter_df.iloc[-1, -1][-1] != frame_length -1:
+                    raise AssertionError("Somethings up! Neural frame length does not align with last index")  
+            except IndexError:
+                iter_df = iter_df[:-1]
+                if iter_df.iloc[-1, -1][-1] != frame_length -1:
+                    raise AssertionError("Somethings up! Neural frame length does not align with last index")
         
         #for i, row in iter_df.iterrows():
             
@@ -259,7 +272,7 @@ def create_task_datasets(task_set, save_dir, include=None):
 
 
 if __name__ == '__main__':
-    include = None#['energy']
+    include = ['f0']
     for corpus, task_set in TASK_SET.items():
         save_dir = Path(f'data/{corpus}/aligned_tasks')
         os.makedirs(save_dir, exist_ok=True)

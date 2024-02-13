@@ -1,5 +1,7 @@
 """some functions adapted from https://github.com/Bartelds/pae_probe_experiments/blob/master/bin/gen_wav2vec_feats_hf.py"""
 from transformers.models.wav2vec2 import Wav2Vec2Model
+from transformers.models.hubert import HubertModel
+from transformers.models.wavlm import WavLMModel
 import soundfile as sf
 import librosa
 import torch
@@ -23,11 +25,35 @@ MODEL_PATH_PREPEND = {
     'mandarin-wav2vec2-aishell1': 'kehanlu',
     'wav2vec2-base-100h': 'facebook',
     'wav2vec2-large-xlsr-53-chinese-zh-cn': 'jonatasgrosman',
-    'wav2vec2-large-960h': 'facebook'
+    'wav2vec2-large-960h': 'facebook',
+    'hubert-base-ls960': 'facebook',
+    'hubert-large': 'facebook',
+    'wavlm-base': 'microsoft',
+    'wavlm-large': 'microsoft'
+}
+
+MODEL_EXTRACTOR_CLASS = {
+    
+    'wav2vec2-large': Wav2Vec2Model,
+    'wav2vec2-large-robust': Wav2Vec2Model,
+    'wav2vec2-large-xlsr-53': Wav2Vec2Model,
+    'wav2vec2-xls-r-300m': Wav2Vec2Model,
+    'mandarin-wav2vec2': Wav2Vec2Model,
+    'wav2vec2-base': Wav2Vec2Model,
+    'mms-300m': Wav2Vec2Model,
+    'mandarin-wav2vec2-aishell1': Wav2Vec2Model,
+    'wav2vec2-base-100h': Wav2Vec2Model,
+    'wav2vec2-large-xlsr-53-chinese-zh-cn':Wav2Vec2Model,
+    'wav2vec2-large-960h': Wav2Vec2Model,
+    'hubert-base-ls960': HubertModel,
+    'hubert-large-ls960': HubertModel, 
+    'wavlm-base': WavLMModel,
+    'wavlm-large': WavLMModel,
 }
 
 def get_feature_func(model_or_feat, layer=None):
     
+    print(model_or_feat)
     if model_or_feat in MODEL_PATH_PREPEND.keys():
         
         model_name = MODEL_PATH_PREPEND.get(model_or_feat, 'facebook') + '/' + model_or_feat
@@ -36,7 +62,8 @@ def get_feature_func(model_or_feat, layer=None):
         if layer is not None:
             model_kwargs["num_hidden_layers"] = layer if layer > 0 else 0
             
-        model = Wav2Vec2Model.from_pretrained(model_name, **model_kwargs)
+        extractor_class = MODEL_EXTRACTOR_CLASS.get(model_or_feat, Wav2Vec2Model)
+        model = extractor_class.from_pretrained(model_name, **model_kwargs)
         
         model.eval()
         if torch.cuda.is_available():

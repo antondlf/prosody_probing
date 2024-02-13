@@ -66,11 +66,13 @@ def get_full_dataset(
         raw_feats = np.load(root_dir / feat_file)
         feat_dim = raw_feats.shape[-1]
         group.dropna(inplace=True)
-        group['start_end_indices'] = group.start_end_indices.map(literal_eval)
+        if group.start_end_indices.dtype != np.float64:
+            group['start_end_indices'] = group.start_end_indices.map(literal_eval)
         group['label'] = group.label.astype(np.float32)
-        group = group.loc[group.start_end_indices.map(lambda x: len(x) > 0)]
+        if group.start_end_indices.dtype == list:
+            group = group.loc[group.start_end_indices.map(lambda x: len(x) > 0)]
         if average_duplicates:
-            group['start_end_indices'] = group.start_end_indices.map(lambda x: x[0])
+            #group['start_end_indices'] = group.start_end_indices.map(lambda x: x[0])
             group.drop_duplicates(subset=['start_end_indices'], keep='first')
             
         if len(group) > 0:
@@ -146,11 +148,11 @@ def train_mlp_regressor(
         optimizer=optim,
         # Parallelization.
         iterator_train__shuffle=True,
-        iterator_train__num_workers=-1,
-        iterator_valid__num_workers=-1,
+        iterator_train__num_workers=1,
+        iterator_valid__num_workers=1,
         # Scoring callbacks.
         callbacks=callbacks,
-        device='cuda'
+        #device='cuda'
         )
     
     params = {
@@ -218,13 +220,13 @@ def train_mlp_classifier(train_data, module,
         optimizer=optim,
         # Parallelization.
         iterator_train__shuffle=True,
-        iterator_train__num_workers=-1,
-        iterator_valid__num_workers=-1,
+        iterator_train__num_workers=1,
+        iterator_valid__num_workers=1,
         #dataset
         dataset = train_dataset,
         # Scoring callbacks.
         callbacks=callbacks,
-        device='cuda'
+        #device='cuda'
         )
     if out_dim==2:
         
@@ -374,10 +376,10 @@ def main():
         '--gpu_count', type=int, default=1, help='Number of GPUs to train with'
     ),
     parser.add_argument(
-        '--balance_classes', type=bool, default=False, help='Whether to artificially balance class counts'
+        '--balance_classes', action='store_true', default=False, help='Whether to artificially balance class counts'
     )
     parser.add_argument(
-        '--mean_pooling', type=bool, default=False, help="Whether to average representations for a given labeled interval."
+        '--mean_pooling',  action='store_true', default=False, help="Whether to average representations for a given labeled interval."
     )
     parser.add_argument(
         '--random_seed', type=int, default=42, help='Random seed for reproducibility'
@@ -408,10 +410,10 @@ def main():
     
     csv_data = pd.read_csv(args.labels)
     if args.task == 'stress':
-        stress_category_mapping = {'p': 2, 'n': 1, 's': 1}
+        stress_category_mapping = {'p': 1, 'n': 0, 's': 0}
         csv_data['label'] = csv_data.label.map(lambda x: stress_category_mapping.get(x, 'SIL'))
     csv_data['speaker'] = csv_data.file_id.map(lambda x: x.split('_')[0])
-    if (args.task != 'f0') and (args.task != 'tone'):
+    if (args.task != 'f0') and (args.task != 'tone') and (args.task != 'energy'):
         csv_data = csv_data.loc[(csv_data.label != 'sil') & (csv_data.label != 'SIL')]
     else:
         csv_data = csv_data.loc[(csv_data.label != 0)&(csv_data.label != 'sil')& (csv_data.label != 'SIL')]
@@ -423,7 +425,7 @@ def main():
     neural_dim = args.neural_dim
     
     average_duplicates = False
-    if args.task == 'f0':
+    if args.task in ['f0', 'energy']:
         out_dim = 1
         regression = True
         average_duplicates = True
