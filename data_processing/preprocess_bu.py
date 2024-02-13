@@ -37,15 +37,16 @@ def get_word_alignments(df):
     segment_rows = list()
     for row in df.iterrows():
     
-        if row[1].phone.startswith('>'):
+        if row[1].phone_label.startswith('>'):
             for seg in segment_rows:
-                seg['word_label'] = row[1].phone
+                seg['word_label'] = row[1].phone_label
             final_rows.extend(segment_rows)
             segment_rows = list()
         else:
             segment_rows.append(row[1])
         
     return pd.DataFrame(final_rows) 
+
     
 def iterate_bu_corpus():
     
@@ -70,6 +71,8 @@ def iterate_bu_corpus():
     for file in bu_dir.glob('**/*.ala'):
         save_path = f'corpora/bu_radio/clean_data/phone/{file.stem}.csv'
         file_df = load_tab_delim(file, col_list=['phone_label', 'timestamp_ms', 'duration_ms'])
+        file_df = get_word_alignments(file_df)
+        save_file(file_df, save_path)
         
     
 if __name__ == '__main__':
