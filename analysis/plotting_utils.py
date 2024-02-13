@@ -2,7 +2,7 @@ import pandas as pd
 from scipy.stats import pearsonr, spearmanr
 from sklearn.preprocessing import LabelBinarizer
 from sklearn.utils import resample
-from sklearn.metrics import f1_score, mean_squared_error, roc_auc_score, log_loss
+from sklearn.metrics import f1_score, mean_squared_error, roc_auc_score, log_loss, r2_score
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -21,7 +21,8 @@ def get_metric(name):
         'roc_auc': roc_auc_score,
         'log_loss': log_loss,
         'pearson': pearsonr,
-        'spearman': spearmanr
+        'spearman': spearmanr,
+        'R2': r2_score
     }
     
     return mapping[name]
@@ -192,6 +193,8 @@ def get_result_df(log_root, metric_mapping, save_path):
         'wav2vec2-xls-r-300m': 'Multilingual Large 128',
         'wav2vec2-large-xlsr-53': 'Multilingual Large 53',
         'wav2vec2-large-xlsr-53-chinese-zh-cn': 'Multilingual Large 53 Finetuned',
+        'hubert-base-ls960h': 'HuBert',
+        'wavlm-base': 'WavLM',
         'fbank': 'Mel-Filterbank',
         'mfcc': 'MFCC'
     }
@@ -206,6 +209,8 @@ def get_result_df(log_root, metric_mapping, save_path):
         'wav2vec2-xls-r-300m': 'Multilingual',
         'wav2vec2-large-xlsr-53': 'Multilingual',
         'wav2vec2-large-xlsr-53-chinese-zh-cn': 'Multilingual Mandarin',
+        'hubert-base-ls960h': 'English',
+        'wavlm-base': 'English',
         'fbank': 'Baseline',
         'mfcc': 'Baseline'
     }
@@ -219,6 +224,8 @@ def get_result_df(log_root, metric_mapping, save_path):
         'wav2vec2-xls-r-300m': 'Pre-trained',
         'wav2vec2-large-xlsr-53': 'Pre-trained',
         'wav2vec2-large-xlsr-53-chinese-zh-cn': 'Fine-tuned',
+        'hubert-base-ls960h': 'Pre-trained',
+        'wavlm-base': 'Pre-trained',
         'fbank': 'Baseline',
         'mfcc': 'MFCC'
     }
@@ -233,6 +240,24 @@ def get_result_df(log_root, metric_mapping, save_path):
         'wav2vec2-large-xlsr-53': 'Large',
         'wav2vec2-xls-r-300m': 'Large',
         'wav2vec2-large-xlsr-53-chinese-zh-cn': 'Large',
+        'hubert-base-ls960h': 'Base',
+        'wavlm-base': 'Base',
+        'fbank': 'Baseline',
+        'mfcc': 'Baseline'
+    }
+    
+    model_type = {
+        'wav2vec2-base': 'Wav2Vec2.0',
+        'mandarin-wav2vec2': 'Wav2Vec2.0',
+        'mandarin-wav2vec2-aishell1': 'Wav2Vec2.0',
+        'wav2vec2-base-100h':'Wav2Vec2.0',
+        'wav2vec2-large': 'Wav2Vec2.0',
+        'wav2vec2-large-960h': 'Wav2Vec2.0',
+        'wav2vec2-large-xlsr-53':'Wav2Vec2.0',
+        'wav2vec2-xls-r-300m': 'Wav2Vec2.0',
+        'wav2vec2-large-xlsr-53-chinese-zh-cn': 'Wav2Vec2.0',
+        'hubert-base-ls960h': 'HuBert',
+        'wavlm-base': 'WavLM',
         'fbank': 'Baseline',
         'mfcc': 'Baseline'
     }
@@ -251,6 +276,7 @@ def get_result_df(log_root, metric_mapping, save_path):
     result_df['model_state'] = result_df.model.map(lambda x: model_state[x])
     result_df['model_size'] = result_df.model.map(lambda x: model_size[x])
     result_df['task_name'] = result_df.task.map(lambda x: task_names_plotting[x])
+    result_df['model_type'] = result_df.model.map(lambda x: model_type[x])
     result_df.to_csv(save_path)
 
     
@@ -304,7 +330,7 @@ def main():
 if __name__ == '__main__':
     #main()
     metric_mapping = {
-        'f0': 'pearson',
+        'f0': 'R2',
         'tone': 'f1_micro',
         'syllables_accents': 'f1_score',
         'phonwords_accents': 'f1_score',
