@@ -53,12 +53,12 @@ data
 ### Comparing Mandarin tone performance vs English pitch accent performance
 
 ```{r}
-data.base.pretrained <- data[((data$task == 'tone')|(data$task == 'syllables_accents'))&((data$model == 'wav2vec2-base') | (data$model == 'mandarin-wav2vec2')),]
+data.base.pretrained <- data[((data$task == 'tone')|(data$task == 'syllables_accents') | (data$task == 'stress'))&((data$model == 'wav2vec2-base') | (data$model == 'mandarin-wav2vec2')),]
 data.base.pretrained %>% ggplot(
   aes(x=layer, y=score, shape=model_names, color=model_names)) +
   geom_point() +
   geom_line() +
-  ylim(0.5, 1) +
+  # ylim(0.5, 1) +
   facet_wrap(~task_name)
   #ggtitle('Pre-trained (~1000h) Base Wav2vec2.0 model Layerwise Performance')
   ggsave("../results/plots/accent_tone_comparison.png")
@@ -68,7 +68,7 @@ data.base.pretrained %>% ggplot(
   geom_point() +
   geom_line() +
   ylim(0.5, 1) +
-  facet_wrap(~task_name, nrow=2) +
+  facet_wrap(~task_name) +
   ggtitle('Pre-trained (~1000h) Base Wav2vec2.0 model Layerwise Performance')
 ```
 
@@ -102,7 +102,7 @@ This figure shows that the performance on Lexical Tone and English Phrasal Pitch
 ## Section 2.1: Stress vs. Tone
 
 ```{r}
-data.base.pretrained.stress <- data[((data$task == 'stress') | (data$task == 'tone'))&((data$model == 'wav2vec2-base') | (data$model == 'mandarin-wav2vec2')),]
+data.base.pretrained.stress <- data[((data$task == 'stress') | (data$task == 'tone')| (data$task == 'syllables_accents'))&((data$model == 'wav2vec2-base') | (data$model == 'mandarin-wav2vec2')),]
 
 data.base.pretrained.stress %>% ggplot(
   aes(x=layer, y=score, shape=model_names, color=model_names)) +
@@ -265,5 +265,19 @@ data.base.large.f0 %>% ggplot(
   #ggtitle('Pre-trained (~1000h) Base Wav2vec2.0 model Layerwise Performance')
 ggsave("../results/plots/large_fine_tuning_f0.png")
 ```
+
+```{r}
+data.base.pretrained.stress <- data[((data$task == 'stress') | (data$task == 'tone'))&((data$model == 'wav2vec2-base') | (data$model == 'mandarin-wav2vec2')|(data$model == 'wav2vec2-large')|(data$model == 'wav2vec2-large-xlsr-53')|(data$model == 'wav2vec2-xls-r-300m')),]
+
+data.base.pretrained.stress %>% ggplot(
+  aes(x=model_percent, y=score, shape=model_names, color=model_names)) +
+  geom_point() +
+  geom_line() +
+  #ylim(0.6, 1) +
+  facet_wrap(~task_name) #+
+  #ggtitle('Pre-trained (~1000h) Base Wav2vec2.0 model Layerwise Performance')
+  ggsave("../results/plots/stress_tone_comparison.png")
+```
+
 
 Analogous comparisons with Large models are on the way but have not finished running.
