@@ -8,11 +8,11 @@ echo $current_path
 DATA_DIR="$current_path/../../data/"
 FEATS_DIR="$DATA_DIR/feats/"
 #MODEL_NAMES="wav2vec2-large-robust"
-MODEL_NAMES="mfcc fbank pitch energy pitch_energy"
+MODEL_NAMES="random"
 LAYER="all"
 PROBES=$2
 CORPORA="mandarin-timit switchboard"
-FEATURES="stress syllables_accents"
+FEATURES="stress syllables_accents f0 energy intensity_parselmouth "
 ##############################################################################
 # Configuration
 ##############################################################################
@@ -50,25 +50,31 @@ if [ $stage -le 1 ]; then
          [ $model == "wav2vec2-large-xlsr-53" ] || [ $model == "wav2vec2-large-xlsr-53-chinese-zh-cn" ] ||\
           [ $model == "wav2vec2-large-960h" ]; then
           layer=24
-        elif [ $model == "fbank" ] || [ $model == "mfcc" ] || [ $model == "pitch" ]; then
+        elif [ $model == "fbank" ] || [ $model == "mfcc" ] || [ $model == "pitch" ] || [ $model == "random" ]; then
           layer=0
         else
           layer=12
         fi
     for corpus in $CORPORA; do
-        if [ $corpus == 'mandarin-timit' ]; then
-            FEATURES="tone"
+        if [ $corpus == 'mandarin-timit' ]; then #&& [ [ $model == 'wav2vec2-large' ] || [ $model == 'wav2vec2-xls-r-300m' ] ]; then
+            FEATURES="tone energy f0 intensity_parselmouth f0_300 energy_std f0_std"
+        
+        elif [ $corpus == 'switchboard' ]; then
+            FEATURES="stress syllables_accents stress_polysyllabic f0 energy intensity_parselmouth f0_300 energy_std f0_std"
+
+        fi
         for feature in $FEATURES; do
           echo "Processing $feature from $model for $corpus"
 
           echo "$0: Running classification experiments..."
-
-          python3 "Probing $model with $probe for $layer layers" >> logs/${model}_${feature}.stdout
-              echo run_probes.py $model $layer -l data/$corpus/aligned_tasks/${feature}.csv \
-             -d data/feats/$corpus -c $corpus -t $feature -r True -p $probe --gpu_count $gpu $3
+        #for l in $(seq 1 1); do
+          echo "Probing $model with $probe for layer $layer" >> logs/${model}_${feature}.stdout
+              python3 run_probes.py $model 0 -l data/$corpus/aligned_tasks/${feature}.csv \
+             -d data/feats/$corpus -c $corpus -t $feature -r True -p $probe #--gpu_count #$gpu #$3
                   >> logs/${model}_${feature}_${corpus}_${probe}.stdout \
                   2>> logs/${model}_${feature}_${corpus}_${probe}.stderr &
     	  wait
+        #done
     	  done
     done
     done

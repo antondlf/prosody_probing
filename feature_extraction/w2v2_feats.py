@@ -6,7 +6,7 @@ import soundfile as sf
 import librosa
 import torch
 import numpy as np
-from acoustic_feats import get_f0, get_energy, get_fbank, get_mfcc, get_pitch_energy
+from acoustic_feats import get_f0, get_energy, get_fbank, get_mfcc, get_pitch_energy, get_pitch_parselmouth
 from transformers import logging
 from pathlib import Path
 from argparse import ArgumentParser
@@ -98,10 +98,10 @@ def get_feature_func(model_or_feat, layer=None):
         return _featurize 
     
     else:
-        if model_or_feat == 'f0':
-            return get_f0
+        if model_or_feat == 'pitch':
+            return get_f0 #get_pitch_parselmouth
 
-        elif model_or_feat == 'rms':
+        elif model_or_feat == 'energy':
             return get_energy
         elif model_or_feat == 'pitch-energy':
             return get_pitch_energy
@@ -146,7 +146,7 @@ def main():
         
     for file in tqdm(list(wav_path.glob('*.wav'))):
         if layer != 'None':
-            if args.model in ['fbank', 'mfcc', 'pitch_energy', 'f0', 'rms']:
+            if args.model in ['fbank', 'mfcc', 'pitch_energy', 'pitch', 'energy']:
                 file_save = feat_save / args.model / f'layer-{0}' / f'{file.stem}.npy'
                 os.makedirs(file_save.parent, exist_ok=True)
                 if not file_save.exists():

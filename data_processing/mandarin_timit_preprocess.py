@@ -38,9 +38,21 @@ def yield_next_tone(x):
         yield tone
 
 
-def map_tone(word_df, phone_df):
+def label_onset(row, shifter):
     
-    phone_and_tone = pd.DataFrame()
+    if row.label == 0:
+        try:
+            return shifter.iloc[row.idx]['label']
+        except KeyError:
+            return row.label
+    
+    else:
+        return row.label
+
+def map_tone(word_df, phone_df, onset=True):
+    
+    #phone_and_tone = pd.DataFrame()
+    phone_and_tone = list()
     for row in word_df.itertuples():
         tone_iterator = yield_next_tone(row.tone)
         df_subset = phone_df.loc[
@@ -48,7 +60,15 @@ def map_tone(word_df, phone_df):
                 (phone_df.end <= row.end)
                     ]
         df_subset['label'] = df_subset.char.map(lambda x: next(tone_iterator) if x in vowel_inventory else 'SIL' if x == 'sil' else 0)
-        phone_and_tone = pd.concat([phone_and_tone, df_subset])
+        phone_and_tone.append(df_subset)
+    phone_and_tone = pd.concat(phone_and_tone)
+    
+    if onset:
+        # map tone to onset
+        shifter = phone_and_tone.shift(-1) 
+        phone_and_tone['idx'] = phone_and_tone.index
+        phone_and_tone['label'] = phone_and_tone.apply(lambda x: label_onset(x, shifter), axis=1)
+        phone_and_tone.drop('idx', axis=1, inplace=True)
     
     return phone_and_tone
 
@@ -57,7 +77,7 @@ def process_mandarin_timit(file_id_list, save_dir):
     
     word_dir = save_dir / 'words'
     phone_dir = save_dir / 'phones'
-    tone_dir = save_dir / 'tone'
+    tone_dir = save_dir / 'tone_rhymes'
     os.makedirs(word_dir, exist_ok=True)
     os.makedirs(phone_dir, exist_ok=True)
     os.makedirs(tone_dir, exist_ok=True)
@@ -75,8 +95,8 @@ def process_mandarin_timit(file_id_list, save_dir):
         word_df['tone'] = word_df.pinyin_txt.map(lambda x: get_tone_indices(x)) 
         
         phone_df = pd.read_csv(base_dir / phone_filename, sep=' ', names=['char', 'start', 'end']) 
-        
-        tone_df = map_tone(word_df, phone_df)
+        onset = False if tone_dir.name.endswith('_rhymes') else True
+        tone_df = map_tone(word_df, phone_df, onset=onset)
         
         file_save = file_id + '.csv'
         tone_df.to_csv(tone_dir/ file_save, index=None)

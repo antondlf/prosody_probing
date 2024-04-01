@@ -111,6 +111,10 @@ def xml2raw_csv(
         directory = xml_dir / feat
         print(f"Processing {feat}...")
         for file in tqdm(list(directory.glob('*.xml'))):
+            if file.name.startswith('sw4033.B'):
+                print()
+            else:
+                continue
             save_stem = ''.join(file.name.split('.')[:2])
             root = get_root(file)
             if save_stem in accent_file_ids:
@@ -142,10 +146,10 @@ def xml2raw_csv(
 def preprocess_switchboard_annotations():
     
     feature_list = [
-    'accent', 'breaks', 'phones', 
-    'phonwords', 'syllables', 'turns',
-    'phrase'
-    #'syllables'
+    #'accent', 'breaks', 'phones', 
+    #'phonwords', 'syllables', 'turns',
+    #'phrase'
+    'syllables'
     ]
     tag_mapping = {
     'accent': ['accent', 'pointer'],
@@ -177,9 +181,9 @@ def preprocess_switchboard_annotations():
     #
     
 if __name__ == '__main__':
-    process_switchboard_audio()
+    #process_switchboard_audio()
     preprocess_switchboard_annotations() 
-    split_move_switchboard()
+    #split_move_switchboard()
     check_folder_lists = {
     'switchboard': ['accent', 'breaks', 'phones', 'phonwords', 'phrase', 'syllables'],
     }

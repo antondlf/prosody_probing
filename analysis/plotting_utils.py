@@ -2,7 +2,7 @@ import pandas as pd
 from scipy.stats import pearsonr, spearmanr
 from sklearn.preprocessing import LabelBinarizer
 from sklearn.utils import resample
-from sklearn.metrics import f1_score, mean_squared_error, roc_auc_score, log_loss, r2_score
+from sklearn.metrics import f1_score, mean_squared_error, roc_auc_score, log_loss, r2_score, accuracy_score, recall_score, precision_score
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -10,6 +10,8 @@ from pathlib import Path
 import numpy as np
 import math
 import os
+from scipy.stats import normaltest
+from confidence_intervals import evaluate_with_conf_int
 
 
 def get_metric(name):
@@ -17,12 +19,21 @@ def get_metric(name):
     mapping = {
         'f1_score': f1_score,
         'f1_micro': f1_score,
+        'f1_macro': f1_score,
         'mean_squared_error': mean_squared_error,
         'roc_auc': roc_auc_score,
         'log_loss': log_loss,
         'pearson': pearsonr,
         'spearman': spearmanr,
-        'R2': r2_score
+        'accuracy': accuracy_score,
+        'R2': r2_score,
+        'normality': normaltest,
+        'recall': recall_score,
+        'precision': precision_score,
+        'recall_macro': recall_score,
+        'precision_macro': precision_score,
+        'recall_micro': recall_score,
+        'precision_micro': precision_score
     }
     
     return mapping[name]
@@ -55,22 +66,35 @@ def get_bootstrap_ci(true_score, data, eval_func, fraction2sample=0.5, n_iterati
     return get_confidence_interval(true_score, scores, sample_size, ci=ci)
 
 
-def calculate_metric(df, metric_name):
+def calculate_metric(df, metric_name, task=None, ci=False):
     
-    metric = get_metric(metric_name)
-    if 'y_proba' in df.columns:
-        
-        if metric_name in ['log_loss', 'roc_auc']:
-            probabilities = df.y_proba.map(lambda x: x[1]).to_numpy()
-            return metric(df.y_true, probabilities)
-        
+    
+    if ci:
+        return evaluate_with_conf_int(df.y_pred, metric_name, df.y_true, num_bootstraps=500, alpha=5)
     else:
-        if metric_name == 'f1_micro':
-            return metric(df.y_true, df.y_pred, average='micro')
-        elif metric_name == 'pearson':
-            return metric(df.y_true, df.y_pred)[0]
+        metric = get_metric(metric_name)
+        if 'y_proba' in df.columns:
+            
+            if metric_name in ['log_loss', 'roc_auc']:
+                probabilities = df.y_proba.map(lambda x: x[1]).to_numpy()
+                return metric(df.y_true, probabilities)
+            
         else:
-            return metric(df.y_true, df.y_pred)
+            if metric_name.endswith('micro'):
+                return metric(df.y_true, df.y_pred, average='micro')
+            elif metric_name.endswith('macro'):
+                return metric(df.y_true, df.y_pred, average='macro')
+
+            elif metric_name == 'pearson':
+                return metric(df.y_true, df.y_pred)[0]
+            elif metric_name == 'normality':
+                statistic, p_value = metric(df.y_true - df.y_pred, nan_policy='omit')
+                return (statistic, p_value)
+            elif (task == 'stress') and (metric_name == 'f1_score'):
+                target_label = df.y_true.unique().min()
+                return metric(df.y_true, df.y_pred, pos_label=target_label)
+            else:
+                return metric(df.y_true, df.y_pred)
         
         
 def loop_model_result_dir(task_dir, layer_number, metric_name):
@@ -105,7 +129,7 @@ def get_model_comparison(log_root, model_list, corpus, task, probe):
     return pd.concat(df_list)
 
 
-def get_log_loss(result_file, result_df):
+def get_log_loss(result_file, result_df, metric):
     
     binarizer = LabelBinarizer()
     layer_num = result_file.stem.split('_')[1]
@@ -115,11 +139,152 @@ def get_log_loss(result_file, result_df):
     # There must be a tab before \n in files because an extra column is being read
     distributions = distribution_df.to_numpy()[:, :-1]
     y_true = binarizer.fit_transform(result_df.y_true)
+    return metric(y_true, distributions)#, labels=distribution_df.columns[:-1])
+
+
+def get_roc_auc(result_file, result_df, multiclass=True):
     
-    return log_loss(y_true, distributions)#, labels=distribution_df.columns[:-1])
+    layer_num = result_file.stem.split('_')[1]
+    
+    dist_path = result_file.parent / f'layer-{layer_num}_distribution.txt'
+    distribution_df = pd.read_csv(dist_path, sep='\t')
+    # There must be a tab before \n in files because an extra column is being read
+    if not multiclass:
+        distributions = distribution_df.to_numpy()[:, 1]
+        return roc_auc_score(result_df.y_true, distributions) 
+
+    else:
+        distributions = distribution_df.to_numpy()[:, :-1]
+        return roc_auc_score(result_df.y_true, distributions, multi_class='ovr')
 
 
-def get_result_df(log_root, metric_mapping, save_path):
+def get_single_metric(task, tsk, metric_mapping, corp, multiclass=False, ci=False):
+    
+    metric = get_metric(metric_mapping[tsk])
+    row_list = list()
+    for model in task.glob('*'):
+        if model.name not in ['linear', 'mlp']:
+            
+            mod = model.stem
+            for probe in model.glob('*'):
+                
+                prob = probe.stem
+                print(f'Calculating {metric_mapping[tsk]} for {tsk} on {mod} and {corp} with {prob} probe...')                    
+                for layer in tqdm(list(probe.glob('layer_*.csv'))):
+                    iter_df = pd.read_csv(layer)
+                    if ci:
+                        result = calculate_metric(iter_df, metric_mapping[tsk], task=tsk, ci=ci)
+                        
+                    elif metric_mapping[tsk] == 'f1_micro':
+                        result = metric(iter_df.y_true, iter_df.y_pred, average='micro')
+                        #confidence_interval = get_bootstrap_ci(result, iter_df, metric, average='micro')  
+                    elif metric_mapping[tsk] == 'mean_squared_error':
+                        result = metric(iter_df.y_true, iter_df.y_pred, squared=False) 
+                        error_distribution = np.absolute(iter_df.y_true.to_numpy() - iter_df.y_pred.to_numpy())
+                        #confidence_interval = get_confidence_interval(result, error_distribution, len(error_distribution)) 
+                    elif metric_mapping[tsk] == 'f1_macro':
+                        result = metric(iter_df.y_true, iter_df.y_pred, average='macro')
+                        #confidence_interval = get_bootstrap_ci(result, iter_df, metric, average='macro')
+                    elif metric_mapping[tsk] == 'log_loss':
+                        result = get_log_loss(layer, iter_df, metric)
+                        #confidence_interval = (np.nan, np.nan)#get_bootstrap_ci(result, iter_df, metric) 
+                    elif metric_mapping[tsk] == 'roc_auc':
+                        result = get_roc_auc(layer, iter_df, multiclass=multiclass)
+                    #elif metric_mapping[tsk] == 'normality':
+                    #    result = metric(iter_df.y_true - iter_df.y_pred)
+                    else: 
+                        result = calculate_metric(iter_df, metric_mapping[tsk], task=tsk)
+                        #confidence_interval = get_bootstrap_ci(result, iter_df, metric) 
+                    #if confidence_interval:
+                    #    row_list.append({
+                    #        'corpus': corp,
+                    #        'model': mod,
+                    #        'task': tsk,
+                    #        'probe': prob,
+                    #        'layer': int(layer.stem.split('_')[1]),
+                    #        'score': result,
+                            #'ci': confidence_interval
+                    #    })
+                    #else:
+                    if ci:
+                        row_list.append({
+                            'corpus': corp,
+                            'task': tsk,
+                            'model': mod,
+                            'probe': prob,
+                            'layer': int(layer.stem.split('_')[1]),
+                            'metric': metric_mapping[tsk].split('_')[0],
+                            'score': result[0],
+                            'ci': result[1],
+                            'ci_high': result[1][0],
+                            'ci_low': result[1][1] 
+                            })
+                    else:
+                        row_list.append({
+                            'corpus': corp,
+                            'task': tsk,
+                            'model': mod,
+                            'probe': prob,
+                            'layer': int(layer.stem.split('_')[1]),
+                            'metric': metric_mapping[tsk].split('_')[0],
+                            'score': result,
+                            }) 
+    return row_list
+
+
+def get_metric_list(task, tsk, metric_mapping, corp, multiclass, ci=False):
+    
+    metric_list = metric_mapping[tsk]
+    row_list = list()
+    print(f'Calculating {tsk} for {corp}')
+    for model in tqdm(list(task.glob('*'))):
+        #if model.name not in ['random', 'fbank', 'mfcc']:
+        #    continue
+        if model.name not in ['linear', 'mlp']:
+            mod = model.stem
+            for probe in model.glob('*'):
+                prob = probe.stem
+                #print(f'Calculating {metric_mapping[tsk]} for {tsk} on {mod} and {corp} with {prob} probe...')                    
+                for layer in probe.glob('layer_*.csv'): #tqdm(list(probe.glob('layer_*.csv'))):
+
+                    iter_df = pd.read_csv(layer)
+                    for metric_name in metric_list:
+                        metric = get_metric(metric_name)
+                        if metric_mapping[tsk] == 'f1_micro':
+                            result = metric(iter_df.y_true, iter_df.y_pred, average='micro')
+                            #confidence_interval = get_bootstrap_ci(result, iter_df, metric, average='micro')  
+                        elif metric_mapping[tsk] == 'mean_squared_error':
+                            result = metric(iter_df.y_true, iter_df.y_pred, squared=False) 
+                            error_distribution = np.absolute(iter_df.y_true.to_numpy() - iter_df.y_pred.to_numpy())
+                            #confidence_interval = get_confidence_interval(result, error_distribution, len(error_distribution)) 
+                        elif metric_mapping[tsk] == 'f1_macro':
+                            result = metric(iter_df.y_true, iter_df.y_pred, average='macro')
+                            #confidence_interval = get_bootstrap_ci(result, iter_df, metric, average='macro')
+                        elif metric_mapping[tsk] == 'log_loss':
+                            result = get_log_loss(layer, iter_df, metric)
+                            #confidence_interval = (np.nan, np.nan)#get_bootstrap_ci(result, iter_df, metric) 
+                        elif metric_mapping[tsk] == 'roc_auc':
+                            result = get_roc_auc(layer, iter_df, multiclass=multiclass)
+                        elif metric_mapping[tsk] == 'normality':
+                            result = metric(iter_df.y_true - iter_df.y_pred)
+                        else:
+
+                            result = calculate_metric(iter_df, metric_name, task=tsk)
+
+                        row_list.append({
+                            'corpus': corp,
+                            'task': tsk,
+                            'model': mod,
+                            'probe': prob,
+                            'layer': int(layer.stem.split('_')[1]),
+                            'metric': metric_name.split('_')[0],
+                            'score': result
+                            #'ci': (None, None)
+                            })
+    return row_list
+
+
+def get_result_df(log_root, metric_mapping, save_path, ci=False):
     """Generates a dataframe of all dfs and saves to
     csv.
     –––––––––––––––––––––––––––––––––––––––––––––––––
@@ -130,57 +295,19 @@ def get_result_df(log_root, metric_mapping, save_path):
     row_list = list()
     
     for corpus in log_root.glob('*'):
-        
+
         corp = corpus.stem
+        if corp == 'mean':
+            continue
         
         for task in corpus.glob('*'):
             tsk = task.stem
-            metric = get_metric(metric_mapping[tsk])
-            for model in task.glob('*'):
-                if model.name not in ['linear', 'mlp']:
-                    mod = model.stem
-                    for probe in model.glob('*'):
-                        
-                        prob = probe.stem
-                        print(f'Calculating {metric_mapping[tsk]} for {tsk} on {mod} and {corp} with {prob} probe...')                    
-                        for layer in tqdm(list(probe.glob('layer_*.csv'))):
-                            iter_df = pd.read_csv(layer)
-                            if metric_mapping[tsk] == 'f1_micro':
-                                result = metric(iter_df.y_true, iter_df.y_pred, average='micro')
-                                #confidence_interval = get_bootstrap_ci(result, iter_df, metric, average='micro')  
-                            elif metric_mapping[tsk] == 'mean_squared_error':
-                                result = metric(iter_df.y_true, iter_df.y_pred, squared=False) 
-                                error_distribution = np.absolute(iter_df.y_true.to_numpy() - iter_df.y_pred.to_numpy())
-                                #confidence_interval = get_confidence_interval(result, error_distribution, len(error_distribution)) 
-                            elif metric_mapping[tsk] == 'f1_macro':
-                                result = metric(iter_df.y_true, iter_df.y_pred, average='macro')
-                                #confidence_interval = get_bootstrap_ci(result, iter_df, metric, average='macro')
-                            elif metric_mapping[tsk] == 'log_loss':
-                                result = get_log_loss(layer, iter_df)
-                                #confidence_interval = (np.nan, np.nan)#get_bootstrap_ci(result, iter_df, metric) 
-                            else: 
-                                result = calculate_metric(iter_df, metric_mapping[tsk])
-                                #confidence_interval = get_bootstrap_ci(result, iter_df, metric) 
-                            #if confidence_interval:
-                            #    row_list.append({
-                            #        'corpus': corp,
-                            #        'model': mod,
-                            #        'task': tsk,
-                            #        'probe': prob,
-                            #        'layer': int(layer.stem.split('_')[1]),
-                            #        'score': result,
-                                    #'ci': confidence_interval
-                            #    })
-                            #else:
-                            row_list.append({
-                                'corpus': corp,
-                                'task': tsk,
-                                'model': mod,
-                                'probe': prob,
-                                'layer': int(layer.stem.split('_')[1]),
-                                'score': result,
-                                #'ci': (None, None)
-                            })
+            multiclass = True if tsk == 'tone' else False
+            if type(metric_mapping[tsk]) == list:
+                row_list.extend(get_metric_list(task, tsk, metric_mapping, corp, multiclass, ci=ci))
+            else:
+                row_list.extend(get_single_metric(task, tsk, metric_mapping, corp, multiclass=multiclass, ci=ci))
+
                                 
     result_df = pd.DataFrame(row_list)
     names_for_plotting = {
@@ -193,10 +320,11 @@ def get_result_df(log_root, metric_mapping, save_path):
         'wav2vec2-xls-r-300m': 'Multilingual Large 128',
         'wav2vec2-large-xlsr-53': 'Multilingual Large 53',
         'wav2vec2-large-xlsr-53-chinese-zh-cn': 'Multilingual Large 53 Finetuned',
-        'hubert-base-ls960h': 'HuBert',
+        'hubert-base-ls960': 'HuBert',
         'wavlm-base': 'WavLM',
         'fbank': 'Mel-Filterbank',
-        'mfcc': 'MFCC'
+        'mfcc': 'MFCC',
+        'random': 'Random Baseline'
     }
     
     model_language = {
@@ -209,10 +337,11 @@ def get_result_df(log_root, metric_mapping, save_path):
         'wav2vec2-xls-r-300m': 'Multilingual',
         'wav2vec2-large-xlsr-53': 'Multilingual',
         'wav2vec2-large-xlsr-53-chinese-zh-cn': 'Multilingual Mandarin',
-        'hubert-base-ls960h': 'English',
+        'hubert-base-ls960': 'English',
         'wavlm-base': 'English',
         'fbank': 'Baseline',
-        'mfcc': 'Baseline'
+        'mfcc': 'Baseline',
+        'random': 'Baseline'
     }
     model_state = {
         'wav2vec2-base': 'Pre-trained',
@@ -224,10 +353,11 @@ def get_result_df(log_root, metric_mapping, save_path):
         'wav2vec2-xls-r-300m': 'Pre-trained',
         'wav2vec2-large-xlsr-53': 'Pre-trained',
         'wav2vec2-large-xlsr-53-chinese-zh-cn': 'Fine-tuned',
-        'hubert-base-ls960h': 'Pre-trained',
+        'hubert-base-ls960': 'Pre-trained',
         'wavlm-base': 'Pre-trained',
         'fbank': 'Baseline',
-        'mfcc': 'MFCC'
+        'mfcc': 'Baseline',
+        'random': 'Baseline'
     }
     
     model_size = {
@@ -240,10 +370,11 @@ def get_result_df(log_root, metric_mapping, save_path):
         'wav2vec2-large-xlsr-53': 'Large',
         'wav2vec2-xls-r-300m': 'Large',
         'wav2vec2-large-xlsr-53-chinese-zh-cn': 'Large',
-        'hubert-base-ls960h': 'Base',
+        'hubert-base-ls960': 'Base',
         'wavlm-base': 'Base',
         'fbank': 'Baseline',
-        'mfcc': 'Baseline'
+        'mfcc': 'Baseline',
+        'random': 'Baseline'
     }
     
     model_type = {
@@ -256,10 +387,11 @@ def get_result_df(log_root, metric_mapping, save_path):
         'wav2vec2-large-xlsr-53':'Wav2Vec2.0',
         'wav2vec2-xls-r-300m': 'Wav2Vec2.0',
         'wav2vec2-large-xlsr-53-chinese-zh-cn': 'Wav2Vec2.0',
-        'hubert-base-ls960h': 'HuBert',
+        'hubert-base-ls960': 'HuBert',
         'wavlm-base': 'WavLM',
         'fbank': 'Baseline',
-        'mfcc': 'Baseline'
+        'mfcc': 'Baseline',
+        'random': 'Baseline'
     }
     
     task_names_plotting = {
@@ -268,7 +400,17 @@ def get_result_df(log_root, metric_mapping, save_path):
         'phones_accents': 'Phone Level Accents',
         'phonwords_accents': 'Word Level Accents',
         'f0': 'Pitch (Hz)',
-        'stress': 'Lexical Stress'
+        'stress': 'Lexical Stress',
+        'energy': 'Root Mean Squared Energy',
+        'intensity': 'Intensity in dB SPL',
+        'intensity_parselmouth': 'Intensity in dB SPL',
+        'stress_polysyllabic': 'Lexical Stress Polysyllabic',
+        'syllables_accents_polysyllabic': 'Phrasal Accents Polysyllabic',
+        'f0_300': 'Pitch (Hz)',
+        'f0_diff': 'F0 Syllable Difference',
+        'f0_std': 'F0 Standard Deviation',
+        'energy_std': 'Energy Standard Deviation',
+        'crepe-f0': 'Pitch (Hz)'
     }
     
     result_df['model_names'] = result_df.model.map(lambda x: names_for_plotting[x])
@@ -331,26 +473,68 @@ if __name__ == '__main__':
     #main()
     metric_mapping = {
         'f0': 'R2',
-        'tone': 'f1_micro',
+        'tone': 'f1_macro',
         'syllables_accents': 'f1_score',
         'phonwords_accents': 'f1_score',
         'phones_accents': 'f1_score',
-        'stress': 'f1_score'
+        'stress': 'f1_score',
+        'energy': 'R2'
     }
-    save_path = 'results/full_results.csv'
-    get_result_df(Path('results/logs_02-05-2024/logs'), metric_mapping, save_path)
+    metric_list_mapping = {
+        'f0': ['R2', 'mean_squared_error', 'pearson', 'normality'],
+        'tone': ['f1_macro', 'accuracy', 'recall_macro', 'precision_macro'],
+        'syllables_accents': ['f1_score', 'accuracy', 'recall', 'precision'],
+        'phonwords_accents': ['f1_score', 'accuracy', 'recall', 'precision'],
+        'phones_accents': ['f1_score', 'accuracy', 'recall', 'precision'],
+        'stress': ['f1_score', 'accuracy', 'recall', 'precision'],
+        'energy': ['R2', 'mean_squared_error', 'pearson', 'normality'],
+        'intensity_parselmouth': ['R2', 'mean_squared_error', 'pearson', 'normality'],
+        'intensity': ['R2', 'mean_squared_error', 'pearson', 'normality'],
+        'stress_polysyllabic':['f1_score', 'accuracy', 'recall', 'precision'], 
+        'f0_300': ['R2', 'mean_squared_error', 'pearson', 'normality'], 
+        'f0_diff': ['R2', 'mean_squared_error', 'pearson', 'normality'], 
+        'f0_std': ['R2', 'mean_squared_error', 'pearson', 'normality'], 
+        'energy_diff': ['R2', 'mean_squared_error', 'pearson', 'normality'], 
+        'energy_std': ['R2', 'mean_squared_error', 'pearson', 'normality'], 
+        'crepe-f0': ['R2', 'mean_squared_error', 'pearson', 'normality'],  
+        'syllables_accents_polysyllabic':['f1_score', 'accuracy', 'recall', 'precision'],  
+    }
+    save_path = 'results/interspeech_final_results.csv'#'results/multi_metric_results.csv'
+    get_result_df(Path('results/logs_03-12-2024/logs'), metric_mapping, save_path, ci=False)#Path('results/logs'), metric_list_mapping, save_path)
     
     
-    save_alternative = 'results/full_results_alternative.csv'
+    save_alternative = 'results/full_results_alternative_roc_auc.csv'
     alternative_mapping = {
         'f0': 'mean_squared_error',
         'tone': 'log_loss',
         'syllables_accents': 'log_loss',
         'phonwords_accents': 'log_loss',
         'phones_accents': 'log_loss',
-        'stress': 'log_loss'
+        'stress': 'log_loss',
+        'energy': 'mean_squared_error'
+    }
+    alternative_mapping2 = {
+        'f0': 'mean_squared_error',
+        'tone': 'accuracy',
+        'syllables_accents': 'accuracy',
+        'phonwords_accents': 'accuracy',
+        'phones_accents': 'accuracy',
+        'stress': 'accuracy',
+        'energy': 'mean_squared_error'
     }
     
-    get_result_df(Path('results/logs_02-05-2024/logs'), alternative_mapping, save_alternative)
+    alternative_mapping3 = {
+        'f0': 'mean_squared_error',
+        'tone': 'roc_auc',
+        'syllables_accents': 'roc_auc',
+        'phonwords_accents': 'roc_auc',
+        'phones_accents': 'roc_auc',
+        'stress': 'roc_auc',
+        'energy': 'mean_squared_error'
+    } 
+    
+    #get_result_df(Path('results/logs_02-05-2024/logs'), alternative_mapping3, save_alternative)
+    
+    
     
         

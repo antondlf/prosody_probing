@@ -1,5 +1,5 @@
 from dataset_creation.create_dataset import BaseDataset
-from sklearn.model_selection import train_test_split, GridSearchCV, cross_validate
+from sklearn.model_selection import train_test_split, GridSearchCV, cross_validate, PredefinedSplit
 from probe.probes import MLPClassifier, MLPRegressor, LinearRegressor, LogisticRegressor, LitRegressor, LitClassifier
 import pandas as pd
 import os
@@ -16,26 +16,47 @@ from skorch.callbacks import EarlyStopping, GradientNormClipping
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score, log_loss,\
 roc_auc_score, make_scorer, mean_squared_error, r2_score, precision_score, recall_score
+from sklearn.dummy import DummyClassifier, DummyRegressor
 import numpy as np
 from tqdm import tqdm
 from ast import literal_eval
 import pickle
 import traceback
+import torch.multiprocessing
+torch.multiprocessing.set_sharing_strategy('file_system')
 
 
-def save_model(model, pickle_path):
-    
-    with open(pickle_path, 'wb') as f:
-        pickle.dump(model, f)
+##############################################################
+##############################################################
+###### Hyperparameter tuning has been set up but has #########
+###### never been fully run. Instead, only one       #########
+###### choice was made for LR parameters: use of     #########
+###### L1 penalty. This was motivated by convergence #########
+###### issues with L2 penalty. The MLP hyperparams   #########
+###### were chosen arbitrarily. A parameter search   #########
+###### can be run with this codebase, however.       #########
+##############################################################
+##############################################################
 
 
-def log_cross_validation(scores, log_dir, best_params=None):
+def save_model(model, pickle_path, model_type='linear'):
+    if model_type != 'mlp':
+        with open(pickle_path, 'wb') as f:
+            pickle.dump(model, f)
+    else:
+        model.save_params(f_params=pickle_path)
+
+
+def log_cross_validation(scores, log_dir, threshold=None, best_params=None):
     """Assumed to be a dict output of gc.cv_results_
     or cross_validate().scores"""
     pd.DataFrame(scores).to_csv(log_dir)
     if best_params:
         with open(log_dir / 'best_params.pickle', 'w') as f:
             pickle.dump(best_params, f)
+    
+    if threshold:
+        pd.DataFrame(threshold, names=['threshold_value', 'f1_score'])
             
 
 def balance_classes(data, col_name='label', random_state=None):
@@ -58,12 +79,14 @@ def get_full_dataset(
     test_df = pd.DataFrame()
     
     if balance_classes:
-        balance_classes(data, col_name='label', random_state=random_state)             
+        balance_classes(data, col_name='label', random_state=random_state) 
+        
+    is_random = True if root_dir.parent.name == 'random' else False
         
     #data = data.loc[(data.label != 'sil') & (data.label != 'SIL')]
-    for name, group in tqdm(list(data.groupby('file_id'))):
+    for name, group in data.groupby('file_id'):
         feat_file = name + '.npy'
-        raw_feats = np.load(root_dir / feat_file)
+        raw_feats = np.load(root_dir / feat_file) if not is_random else np.zeros((int(group.start.iloc[-1] / 0.02 + 30), 1))
         feat_dim = raw_feats.shape[-1]
         group.dropna(inplace=True)
         if group.start_end_indices.dtype != np.float64:
@@ -73,7 +96,8 @@ def get_full_dataset(
             group = group.loc[group.start_end_indices.map(lambda x: len(x) > 0)]
         if average_duplicates:
             #group['start_end_indices'] = group.start_end_indices.map(lambda x: x[0])
-            group.drop_duplicates(subset=['start_end_indices'], keep='first')
+            group = group.groupby(['file_id', 'start_end_indices', 'speaker']).mean().reset_index()
+            #group.drop_duplicates(subset=['start_end_indices'], keep='first')
             
         if len(group) > 0:
             if average:
@@ -84,7 +108,7 @@ def get_full_dataset(
                 full_group = group
             else:
                 full_group = group.explode('start_end_indices')
-                indices = full_group.start_end_indices.map(int).to_numpy()            
+                indices = full_group.start_end_indices.map(int).to_numpy() 
                 feats.append(raw_feats[indices, :])
             
             # Full group should be the appropriate group in either case:
@@ -113,14 +137,16 @@ def get_full_dataset(
 
 def train_mlp_regressor(
     train_data, module, log_dir,
+    validation=False,
     criterion=torch.nn.MSELoss,
     optim=torch.optim.SGD,
     batch=128,
     random_state=42,
     input_dim=768,
-    h_dim=128,
+    h_dim=512,
     cross_validation=True,
-    best_params=True
+    best_params=True,
+    tune_params=False
     ):
     torch.cuda.empty_cache()
     torch.manual_seed(random_state)
@@ -148,8 +174,8 @@ def train_mlp_regressor(
         optimizer=optim,
         # Parallelization.
         iterator_train__shuffle=True,
-        iterator_train__num_workers=1,
-        iterator_valid__num_workers=1,
+        iterator_train__num_workers=10,
+        iterator_valid__num_workers=10,
         # Scoring callbacks.
         callbacks=callbacks,
         #device='cuda'
@@ -161,8 +187,16 @@ def train_mlp_regressor(
     'module__hidden_dim': [128, 384],
     }
     X, y = train_data
+    
     if cross_validation:
-        gs = GridSearchCV(model, params, refit='neg_mean_squared_error', scoring=['neg_mean_squared_error', 'r2'], cv=3, verbose=2)
+        cv = cross_validate(model, X, y, scoring=['neg_mean_squared_error', 'r2'], cv=5, verbose=2)
+        log_cross_validation(cv, log_dir, best_params=None)
+        model.fit(X, y)
+        return model
+    
+    elif tune_params:
+        ps = PredefinedSplit(validation.index)
+        gs = GridSearchCV(model, params, refit='neg_mean_squared_error', scoring=['neg_mean_squared_error', 'r2'], cv=ps, verbose=2)
         gs.fit(X, y.reshape(-1, 1))
         
         log_cross_validation(gs.cv_results_, log_dir, best_params=gs.best_params_)
@@ -179,15 +213,17 @@ def train_mlp_regressor(
 
 def train_mlp_classifier(train_data, module,
     log_dir,
+    validation=False,
     criterion=torch.nn.CrossEntropyLoss,
     optim=torch.optim.SGD,
     batch=128,
     random_state=42,
     input_dim=768,
-    h_dim=128,
+    h_dim=512,
     out_dim=2,
     cross_validation=True,
-    best_params=True
+    best_params=True,
+    tune_params=False
     ):
     torch.cuda.empty_cache()
     torch.manual_seed(random_state)
@@ -212,7 +248,8 @@ def train_mlp_classifier(train_data, module,
         module, module__out_dim=out_dim, module__hidden_dim=h_dim,
         module__in_dim=input_dim,
         # Training batch/time/etc.
-        max_epochs=50, batch_size=batch,
+        max_epochs=50,
+        batch_size=batch,
         # Training loss.
         criterion=criterion,
         #criterion__weight=weights,
@@ -220,10 +257,10 @@ def train_mlp_classifier(train_data, module,
         optimizer=optim,
         # Parallelization.
         iterator_train__shuffle=True,
-        iterator_train__num_workers=1,
-        iterator_valid__num_workers=1,
+        iterator_train__num_workers=10,
+        iterator_valid__num_workers=10,
         #dataset
-        dataset = train_dataset,
+        #dataset = train_dataset,
         # Scoring callbacks.
         callbacks=callbacks,
         #device='cuda'
@@ -249,8 +286,15 @@ def train_mlp_classifier(train_data, module,
     }
 
     if cross_validation:
+        cv = cross_validate(model, X, y, scoring=scores, cv=5, verbose=2)
+        log_cross_validation(cv, log_dir, best_params=None)
+        model.fit(X, y)
+        return model
+    
+    elif tune_params:
+        ps = PredefinedSplit(validation.index)
         gs = GridSearchCV(model, params, refit='log_loss',
-                          scoring=scores, cv=3, verbose=2,
+                          scoring=scores, cv=ps, verbose=2,
                           n_jobs=-1
                           )
         gs.fit(train_dataset.X, train_dataset.y)
@@ -266,12 +310,12 @@ def train_mlp_classifier(train_data, module,
         return model
      
 
-def train_regression(train_data, log_dir, cross_validation=True):
+def train_regression(train_data, log_dir, validation=False, cross_validation=True):
 
     X, y = train_data
     linear_model = LinearRegression(n_jobs=-1)
     if cross_validation:
-        cv = cross_validate(linear_model, X, y, scoring=['neg_mean_squared_error', 'r2'], cv=3, verbose=2)
+        cv = cross_validate(linear_model, X, y, scoring=['neg_mean_squared_error', 'r2'], cv=5, verbose=2)
         log_cross_validation(cv, log_dir, best_params=None)
         
     linear_model.fit(X, y)
@@ -279,18 +323,14 @@ def train_regression(train_data, log_dir, cross_validation=True):
     return linear_model
 
 
-def train_logistic_classifier(train_data, log_dir, binary=False, cross_validation=True, best_params=True):
+def train_logistic_classifier(train_data, log_dir, binary=False, cross_validation=True, best_params=True, validation=False, tune_params=False):
     
     X, y = train_data
     
     # Define parameters for search and scoring strategy.
     param_grid = [{
-        'C': [1, 10, 100, 1000],'penalty': ['l2'], 'max_iter': [200]
-    },
-    {
-        'C': [1, 10, 100, 1000], 'penalty': ['l1'], 'solver': ['liblinear']
-    }
-                  ]
+        'C': [1, 10, 100, 1000]
+    }]
     
     if binary:
         
@@ -306,21 +346,43 @@ def train_logistic_classifier(train_data, log_dir, binary=False, cross_validatio
             #'roc': 'roc_auc', not supported for multi class classification
             # There are some workarounds but I am not implementing any.
             'log_loss': 'neg_log_loss'}
-    model = LogisticRegression(penalty='l1', solver='saga', n_jobs=-1, max_iter=200)
+    
+    model = LogisticRegression(penalty='l1', multi_class='auto', solver='saga', n_jobs=-1, max_iter=200)
+        
     if cross_validation:
+        
+        cv = cross_validate(model, X, y, scoring=scores, cv=5, verbose=2)
+        log_cross_validation(cv.cv_results_, log_dir)
+        
+        model.fit(X, y)
+        return model
+    
+    elif tune_params:
+        print('Functionality for parameter tuning has not been implemented')
+        pass
         # instantiate and fit grid search
+        ps = PredefinedSplit(validation.index)
         gs = GridSearchCV(model, param_grid,
                     scoring=scores,
                     refit='log_loss', 
-                    cv=3, verbose=2,
+                    cv=ps, verbose=2,
                     n_jobs=-1
                     )
         
         gs.fit(X, y)
-
-        log_cross_validation(gs.cv_results_, log_dir, best_params=gs.best_params_)
+        dev_feats, dev_labels = X[validation.index, :], y[validation.index]
         
-        return gs.best_estimator_
+        dist = gs.best_estimator_.predict_proba(dev_feats)
+        threshold_results = list()
+        for threshold in [0.25, 0.5, 0.75]:
+            
+            Y_test_pred = dist.applymap(lambda x: 1 if x>threshold else 0)
+            if gs.best_estimator_.coef_.shape[0] > 2:
+                score = f1_score(dev_labels, Y_test_pred, average='macro')
+            else:
+                score = f1_score(dev_labels, Y_test_pred)
+            
+            threshold_results.append([threshold, score])
     
     else:
         if best_params:
@@ -393,7 +455,7 @@ def main():
     
     """
     
-    mean_pooling = args.mean_pooling
+    mean_pooling = args.mean_pooling if (args.task != 'energy_std') & (args.task != 'f0_std') else True
     balance_classes = args.balance_classes
     seed = args.random_seed
     # Create different log dirs to keep track of conditions
@@ -409,23 +471,65 @@ def main():
     os.makedirs(log_path, exist_ok=True)
     
     csv_data = pd.read_csv(args.labels)
-    if args.task == 'stress':
+    if args.task.startswith('stress'):
         stress_category_mapping = {'p': 1, 'n': 0, 's': 0}
         csv_data['label'] = csv_data.label.map(lambda x: stress_category_mapping.get(x, 'SIL'))
-    csv_data['speaker'] = csv_data.file_id.map(lambda x: x.split('_')[0])
-    if (args.task != 'f0') and (args.task != 'tone') and (args.task != 'energy'):
+    
+    if args.corpus_name == 'yemba':
+        if args.task == 'tone':
+            yemba_tone_mappings = {'bas': 0, 'moyen': 1, 'haut': 2}
+            csv_data['label'] = csv_data.label.map(lambda x: yemba_tone_mappings[x])
+            
+        csv_data['speaker'] = csv_data.file_id.map(lambda x: x.split('_')[1])
+    elif args.corpus_name == 'bu_radio':
+        csv_data['speaker'] = csv_data.file_id.map(lambda x: x[:2])
+    else:
+        csv_data['speaker'] = csv_data.file_id.map(lambda x: x.split('_')[0])
+    if (args.task.endswith('f0')) and (args.task != 'tone') and (args.task != 'energy'):
         csv_data = csv_data.loc[(csv_data.label != 'sil') & (csv_data.label != 'SIL')]
     else:
-        csv_data = csv_data.loc[(csv_data.label != 0)&(csv_data.label != 'sil')& (csv_data.label != 'SIL')]
+        csv_data = csv_data.loc[(csv_data.label != 0)&(csv_data.label != 'sil')& (csv_data.label != 'SIL')&(csv_data.label.notna())]
 
-    train_speakers, test_speakers = train_test_split(csv_data.speaker.unique(), test_size=0.2, random_state=seed) #stratify='file_id', but I want to split file ids
-    train = csv_data.loc[csv_data.speaker.isin(train_speakers)]
+    if args.task == 'tone':
+        csv_data['label'] = csv_data.label.map(lambda x: int(x)-1)
+        
+    
+    #for layer in range(0, args.layer +1):
+    layer = int(args.layer)
+    # Only cross validate on 0th, middle and second to last layer.
+    if layer in [0, args.layer / 2, args.layer-1]:
+        #cross_validation = True
+        tune_params = True
+    else:
+        tune_params = False
+        
+    ####################
+    # In case training
+    # needs to be sped up
+    # set to False
+    cross_validation = True
+    # The next three 
+    # booleans are for 
+    # an undeveloped 
+    # functionality
+    tune_params = False #True
+    validation_split = False
+    best_params=False
+    ####################      
+    
+    full_train_speakers, test_speakers = train_test_split(csv_data.speaker.unique(), test_size=0.2, random_state=seed) #stratify='file_id', but I want to split file ids
+    if validation_split:
+        train_speakers, dev_speakers = train_test_split(full_train_speakers.speaker.unique(), test_size=0.2, random_state=seed)
+        dev = csv_data.loc[csv_data.speaker.isin(dev_speakers)]
+
+    
+    train = csv_data.loc[csv_data.speaker.isin(full_train_speakers)]
     test = csv_data.loc[csv_data.speaker.isin(test_speakers)]
 
     neural_dim = args.neural_dim
     
     average_duplicates = False
-    if args.task in ['f0', 'energy']:
+    if args.task in ['f0', 'crepe-f0', 'energy', 'intensity', 'intensity_parselmouth', 'f0_std', 'energy_std', 'f0_diff', 'energy_diff']:
         out_dim = 1
         regression = True
         average_duplicates = True
@@ -448,110 +552,110 @@ def main():
         neural_dim = 1024
     hidden_dim = args.hidden_dim
     print(f'Probing all {args.layer} layers of {args.model}')
-    for layer in range(0, args.layer +1):
- 
-        # Only cross validate on 0th, middle and second to last layer.
-        if layer in [0, args.layer / 2, args.layer-1]:
-            cross_validation = True
-        else:
-            cross_validation = False
-            
-        ####################
-        # In case training
-        # needs to be sped up
-        cross_validation = False
-        best_params=False
-        ####################  
-           
-        root_dir = args.root_dir / args.model / f'layer-{layer}'
 
-            
-        train_set = get_full_dataset(
+        
+    root_dir = args.root_dir / args.model / f'layer-{layer}'
+
+    train_set = get_full_dataset(
             train, root_dir, 
             regression=regression,
             average_duplicates=average_duplicates,
             average=mean_pooling,
             balance_classes=balance_classes
             )
-        cv_log_dir = log_path / f"cross_val_results_{layer}.csv"
-        print('\nStarting training loop...') 
-        if args.probe == 'mlp':
-            if regression:
-                model = train_mlp_regressor(train_set, MLPRegressor, cv_log_dir,
-                                            cross_validation=cross_validation, batch=args.batch_size,
-                                            input_dim=neural_dim, best_params=best_params,
+
+    cv_log_dir = log_path / f"cross_val_results_{layer}.csv"
+    print('\nStarting training loop...')
+    
+    if args.model == 'random':
+        model =  DummyRegressor(strategy='mean') if regression else DummyClassifier(strategy='stratified', random_state=seed)
+        binary = True if (args.task != 'tone') and (not regression) else False
+        X, y = train_set
+        model.fit(X, y)
+    elif args.probe == 'mlp':
+        if regression:
+            model = train_mlp_regressor(train_set, MLPRegressor, cv_log_dir, validation=dev,
+                                        h_dim=hidden_dim,
+                                        tune_params=tune_params,
+                                        cross_validation=cross_validation, batch=args.batch_size,
+                                        input_dim=neural_dim, best_params=best_params,
+                                        random_state=seed
+                                        )
+        else:
+            binary = True if args.task != 'tone' else False
+            model = train_mlp_classifier(train_set, MLPClassifier, cv_log_dir, validation=dev,
+                                            h_dim=hidden_dim,
+                                            tune_params=tune_params, 
+                                            out_dim=out_dim, cross_validation=cross_validation,
+                                            batch=args.batch_size, input_dim=neural_dim, best_params=best_params,
                                             random_state=seed
                                             )
-            else:
-                model = train_mlp_classifier(train_set, MLPClassifier, cv_log_dir, 
-                                             out_dim=out_dim, cross_validation=cross_validation,
-                                             batch=args.batch_size, input_dim=neural_dim, best_params=best_params,
-                                             random_state=seed
-                                             )
+    else:
+        if regression:
+            #LogisticRegression()
+            model = train_regression(train_set, cv_log_dir, validation=dev)
         else:
-            if regression:
-                #LogisticRegression()
-                model = train_regression(train_set, cv_log_dir, cross_validation=cross_validation)
-            else:
-                binary = True if args.task != 'tone' else False
-                model = train_logistic_classifier(train_set, cv_log_dir, binary=binary, cross_validation=cross_validation, best_params=best_params)
-        ###################
-        # save_model object
-        save_model(model, log_path / f'layer_{layer}_model.pickle')
-        ###################
-        print('Done training!')
-        print('Beginning test loop...')
-        test_feats, test_labels, test_df = get_full_dataset(
-            test, root_dir, regression=regression,
-            testing=True, average_duplicates=average_duplicates,
-            average=mean_pooling
-            )
-        y_pred = model.predict(test_feats)
+            binary = True if args.task != 'tone' else False
+            model = train_logistic_classifier(train_set, cv_log_dir, binary=binary, validation=dev, best_params=best_params, tune_params=tune_params)
+    ###################
+    # save_model object
+    save_model(model, log_path / f'layer_{layer}_model.pickle', model_type=args.probe)
+    ###################
+    print('Done training!')
+    print('Beginning test loop...')
+    test_feats, test_labels, test_df = get_full_dataset(
+        test, root_dir, regression=regression,
+        testing=True, average_duplicates=average_duplicates,
+        average=mean_pooling
+        )
+    y_pred = model.predict(test_feats)
+    if args.probe == 'mlp':
+        y_pred = y_pred.flatten()
 
-        print()
-        print('Testing done, outputting results...')        
-        print(f"Results for {args.model} on {args.task} with {args.probe} on layer {layer}")
-        if not regression:
-            f1_result = f1_score(test_labels, y_pred) if binary else f1_score(test_labels, y_pred, average='micro'),
-            precision_result = precision_score(test_labels, y_pred) if binary else precision_score(test_labels, y_pred, average='micro')
-            recall_result = recall_score(test_labels, y_pred) if binary else recall_score(test_labels, y_pred, average='micro')
-            print("layer\tcorpus\tf1_score\taccuracy\tprecision\trecall")
-            print(f"{layer}\t{args.corpus_name}\t{f1_result}\t{accuracy_score(test_labels,y_pred)}\t\
-                {precision_result}\t{recall_result}")
-            y_pred_proba = model.predict_proba(test_feats)
-            classes = model.classes_
-            result_dict = {
-                'file_id': test_df.file_id, 'neural_index': test_df.start_end_indices,
-                'y_true': test_labels, 'y_pred': y_pred,
-                #'y_proba': y_pred_proba,
-                #'classes': [classes]*len(test_df)
-                }
-            with open(log_path / f'layer-{layer}_distribution.txt', 'w') as f:
-                for c in classes:
-                    f.write(f"{str(c)}\t")
-                f.write('\n')
-                for prob in y_pred_proba:
-                    for p in prob:
-                        f.write(f"{str(p)}\t")
-                    f.write('\n')
-                        
-            
-        else:
-            print("layer\tcorpus\tmse\tr2")
-            print(f"{layer}\t{args.corpus_name}\t{mean_squared_error(test_labels, y_pred)}\{r2_score(test_labels, y_pred)}")
-            result_dict = {
-            'file_id': test_df.file_id, 'neural_index': test_df.start_end_indices, 'y_pred': y_pred, 'y_true': test_labels
+    print()
+    print('Testing done, outputting results...')        
+    print(f"Results for {args.model} on {args.task} with {args.probe} on layer {layer}")
+    if not regression:
+        f1_result = f1_score(test_labels, y_pred) if binary else f1_score(test_labels, y_pred, average='micro'),
+        precision_result = precision_score(test_labels, y_pred) if binary else precision_score(test_labels, y_pred, average='micro')
+        recall_result = recall_score(test_labels, y_pred) if binary else recall_score(test_labels, y_pred, average='micro')
+        print("layer\tcorpus\tf1_score\taccuracy\tprecision\trecall")
+        print(f"{layer}\t{args.corpus_name}\t{f1_result}\t{accuracy_score(test_labels,y_pred)}\t\
+            {precision_result}\t{recall_result}")
+        y_pred_proba = model.predict_proba(test_feats)
+        classes = model.classes_
+        result_dict = {
+            'file_id': test_df.file_id, 'neural_index': test_df.start_end_indices,
+            'y_true': test_labels, 'y_pred': y_pred,
+            #'y_proba': y_pred_proba,
+            #'classes': [classes]*len(test_df)
             }
-        print('Outputting result dataframe...')
-        print()
-        try:
-            results = pd.DataFrame(result_dict)
-    
-            results.to_csv(f"{log_path}/layer_{layer}.csv")  
-        except ValueError:
-            print(traceback.format_exc())
-            for k, v in result_dict.items():
-                print(f"{k}: {len(v)}")
+        with open(log_path / f'layer-{layer}_distribution.txt', 'w') as f:
+            for c in classes:
+                f.write(f"{str(c)}\t")
+            f.write('\n')
+            for prob in y_pred_proba:
+                for p in prob:
+                    f.write(f"{str(p)}\t")
+                f.write('\n')
+                    
+        
+    else:
+        print("layer\tcorpus\tmse\tr2")
+        print(f"{layer}\t{args.corpus_name}\t{mean_squared_error(test_labels, y_pred)}\{r2_score(test_labels, y_pred)}")
+        result_dict = {
+        'file_id': test_df.file_id, 'neural_index': test_df.start_end_indices, 'y_pred': y_pred, 'y_true': test_labels
+        }
+    print('Outputting result dataframe...')
+    print()
+    try:
+        results = pd.DataFrame(result_dict)
+
+        results.to_csv(f"{log_path}/layer_{layer}.csv")  
+    except ValueError:
+        print(traceback.format_exc())
+        for k, v in result_dict.items():
+            print(f"{k}: {len(v)}")
     
 if __name__ == '__main__':
     main()   

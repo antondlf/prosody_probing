@@ -7,8 +7,6 @@ import os
 import shutil
 import math
 import librosa
-import torch.multiprocessing
-torch.multiprocessing.set_sharing_strategy('file_system')
 
 SWITCHBOARD_PATH = Path('data/switchboard')
 
@@ -17,20 +15,52 @@ TASK_SET = {
     {#'phone_accents': (SWITCHBOARD_PATH / 'phones', SWITCHBOARD_PATH / 'accents', SWITCHBOARD_PATH / 'wav'),
      'word_accents': (SWITCHBOARD_PATH / 'phonwords', SWITCHBOARD_PATH / 'accents', SWITCHBOARD_PATH / 'wav'),
      'syllable_accents': (SWITCHBOARD_PATH / 'syllables', SWITCHBOARD_PATH / 'accents', SWITCHBOARD_PATH / 'wav'),
-     'phone_accents': (SWITCHBOARD_PATH / 'phones', SWITCHBOARD_PATH / 'accents', SWITCHBOARD_PATH / 'wav'),
+     #'phone_accents': (SWITCHBOARD_PATH / 'phones', SWITCHBOARD_PATH / 'accents', SWITCHBOARD_PATH / 'wav'),
      
      'stress': (SWITCHBOARD_PATH / 'syllables', None, SWITCHBOARD_PATH / 'wav'),
+     'stress_polysyllabic': (SWITCHBOARD_PATH / 'syllables', None, SWITCHBOARD_PATH / 'wav'),
+     'syllable_accents_polysyllabic': (SWITCHBOARD_PATH / 'syllables', SWITCHBOARD_PATH / 'accents', SWITCHBOARD_PATH / 'wav'),
      
      'phonemes': (SWITCHBOARD_PATH / 'phones', None, SWITCHBOARD_PATH / 'wav'),
      'f0': (SWITCHBOARD_PATH / 'f0', None, SWITCHBOARD_PATH / 'wav'),
-     'energy': (SWITCHBOARD_PATH / 'energy', None, SWITCHBOARD_PATH / 'wav')
+     'f0_std':(SWITCHBOARD_PATH / 'f0_std', None, SWITCHBOARD_PATH / 'wav'),
+     'f0_diff':(SWITCHBOARD_PATH / 'f0_diff', None, SWITCHBOARD_PATH / 'wav'),  
+     'energy': (SWITCHBOARD_PATH / 'energy', None, SWITCHBOARD_PATH / 'wav'),
+     'crepe-f0': (SWITCHBOARD_PATH / 'crepe-f0', None, SWITCHBOARD_PATH / 'wav'),
+     'energy_std': (SWITCHBOARD_PATH / 'energy_std', None, SWITCHBOARD_PATH / 'wav'),
+    'energy_diff': (SWITCHBOARD_PATH / 'energy_diff', None, SWITCHBOARD_PATH / 'wav'),
+    'intensity': (SWITCHBOARD_PATH / 'intensity', None, SWITCHBOARD_PATH / 'wav'),
+    'intensity_parselmouth': (SWITCHBOARD_PATH / 'intensity_parselmouth', None, SWITCHBOARD_PATH / 'wav'),
+    'f0_300': (SWITCHBOARD_PATH / 'f0_300', None, SWITCHBOARD_PATH / 'wav'),
+
     },
     
     'mandarin-timit':
         {
             'tone': (Path('data/mandarin-timit/tone'), None, Path('data/mandarin-timit/wav')),
+            'tone_rhymes': (Path('data/mandarin-timit/tone_rhymes'), None, Path('data/mandarin-timit/wav')),
             'f0': (Path('data/mandarin-timit/f0'), None, Path('data/mandarin-timit/wav')),
-            'energy': (Path('data/mandarin-timit/energy'), None, Path('data/mandarin-timit/wav'))
+            'f0_std': (Path('data/mandarin-timit/f0_std'), None, Path('data/mandarin-timit/wav')),
+            'f0_diff': (Path('data/mandarin-timit/f0_diff'), None, Path('data/mandarin-timit/wav')),
+            'energy': (Path('data/mandarin-timit/energy'), None, Path('data/mandarin-timit/wav')),
+            'crepe-f0': (Path('data/mandarin-timit/crepe-f0'), None, Path('data/mandarin-timit/wav')), 
+            'energy_std': (Path('data/mandarin-timit/energy_std'), None, Path('data/mandarin-timit/wav')),
+            'energy_diff': (Path('data/mandarin-timit/energy_diff'), None, Path('data/mandarin-timit/wav')),
+            'intensity': (Path('data/mandarin-timit/intensity'), None, Path('data/mandarin-timit/wav')),
+            'intensity_parselmouth': (Path('data/mandarin-timit/intensity_parselmouth'), None, Path('data/mandarin-timit/wav')),
+            'f0_300': (Path('data/mandarin-timit/f0_300'), None, Path('data/mandarin-timit/wav')),
+        },
+    'bu_radio':
+        {
+            'phone_accents': (Path('data/bu_radio/phones_accents'), None, Path('data/bu_radio/wav')),
+            'word_accents': (Path('data/bu_radio/word_accents'), None, Path('data/bu_radio/wav')),
+            'f0': (Path('data/bu_radio/f0'), None, Path('data/bu_radio/wav')),
+            'crepe-f0': (Path('data/bu_radio/crepe-f0'), None, Path('data/bu_radio/wav')),
+            'energy': (Path('data/bu_radio/energy'), None, Path('data/bu_radio/wav')),
+            'intensity': (Path('data/bu_radio/intensity'), None, Path('data/bu_radio/wav')),
+            'intensity_parselmouth': (Path('data/bu_radio/intensity_parselmouth'), None, Path('data/bu_radio/wav')),
+            'f0_300': (Path('data/bu_radio/f0_300'), None, Path('data/bu_radio/wav')),
+        
         }
 
 }
@@ -78,6 +108,29 @@ def ms2idx(time_s, step_s=0.02):
     step_ms = int(step_s * 1000)
     return ((time_ms - (time_ms%step_ms))/ step_ms)
 
+
+def map_word_label(row, word_df):
+    
+   try:
+       return word_df.loc[(word_df.start <= row.start)&(word_df.end >=row.end)].label.item()
+   except ValueError:
+       return np.nan
+
+
+def remove_monosyllables(df, root_dir, filename, feat_name='phonwords'):
+    
+    word_df = pd.read_csv(root_dir.parent / feat_name / filename)
+    
+    df['word'] = df.apply(lambda x: map_word_label(x, word_df), axis=1)
+    
+    
+    df['syllable_length'] = df.groupby(df['word'].ne(df['word'].shift()).cumsum()).word.transform(len)
+    #df.dropna(inplace=True)
+    df = df.loc[(df.label != 'sil')&(df.label != 'SIL')]
+    
+    return df.loc[df.syllable_length > 1][['file_id', 'start', 'end', 'label']]
+    
+
 def find_accent_label(x, accent_file, binary_accent=True):
     # One word "sw4019.B.phonwords.xml#id(ms33B_pw98)" in turn 38 of this conversation
     # "boy" is labeled with two accents. There is no reason (at least according to this author)
@@ -101,21 +154,26 @@ def find_accent_label(x, accent_file, binary_accent=True):
 
 
 ## Get the entire dataset with indices
-def get_neural_indices(annotation_dir, save_dir, wav_dir, accent_dir=None, binary_accent=True, step=0.02):
+def get_neural_indices(annotation_dir, save_dir, wav_dir, accent_dir=None, remove_monosyllabic=False, binary_accent=True, step=0.02):
     
     experiment_df = pd.DataFrame()
     tmp_dir =  save_dir / 'tmp_save'
     os.makedirs(tmp_dir, exist_ok=True)
     for file in tqdm(list(annotation_dir.glob('*.csv'))):
         iter_df = pd.read_csv(file, index_col=0)
-        iter_df['file_id'] = file.stem
-        if (annotation_dir.name != 'phones') and (annotation_dir.name not in ['f0', 'energy']):
+        iter_df['file_id'] = file.name.replace('.csv', '')
+        if (annotation_dir.name != 'phones') and (annotation_dir.name not in ['f0', 'f0_300', 'crepe-f0', 'energy', 'intensity', 'intensity_parselmouth']):
             # This is super hacky, better to have consistency over 
             # different tasks but for now it will do
             iter_df = derive_silences(iter_df)
+        
+        if remove_monosyllabic:
+            iter_df = remove_monosyllables(iter_df, annotation_dir, file.name, feat_name='phonwords')
+            if len(iter_df) == 0:
+                continue
         # This format can then be exploded after reading
         #try:
-        if annotation_dir.name in ['f0', 'energy']:
+        if annotation_dir.name in ['f0', 'f0_300', 'crepe-f0', 'energy', 'intensity', 'intensity_parselmouth']:
             iter_df['start_end_indices'] = iter_df.start.map(
                 lambda x: \
                     ms2idx(x, step_s=step)
@@ -144,14 +202,17 @@ def get_neural_indices(annotation_dir, save_dir, wav_dir, accent_dir=None, binar
                     find_accent_label(x, accent_file, binary_accent=binary_accent), axis=1
             )
         # Refactor all of these checks into two separate functions.
-        if annotation_dir.name not in ['f0', 'energy']:
+        if annotation_dir.name not in ['f0', 'f0_300', 'crepe-f0', 'energy', 'intensity', 'intensity_parselmouth']:
             iter_df['start_end_indices'] = iter_df.start_end_indices.map(lambda x: list(range(int(x[0]), int(x[1]))))
         
         # Avoid off by one error by calculating the amount of sample outputs
         # And removing one sample if necessary
         file_sample_length = sf.read(wav_dir / f"{file.stem}.wav")[0].shape[0]
-        if annotation_dir.name in ['f0', 'energy']:
+        if annotation_dir.name in ['f0', 'f0_300','crepe-f0', 'energy', 'intensity', 'intensity_parselmouth']:
             last_index = iter_df.iloc[-1, -1]
+        elif annotation_dir.name == 'phones_accents':
+            iter_df = iter_df.loc[iter_df.start_end_indices.map(lambda x: len(x)>0)]
+            last_index = iter_df.iloc[-1, -1][-1]
         else: 
             try:
                 last_index = iter_df.iloc[-1, -1][-1]#start_end_indices[-1].item()[-1]
@@ -167,7 +228,7 @@ def get_neural_indices(annotation_dir, save_dir, wav_dir, accent_dir=None, binar
         if last_index != frame_length - 1:
             if last_index > frame_length - 1:
                 if last_index == frame_length: 
-                    if annotation_dir.name in ['f0', 'energy']:
+                    if annotation_dir.name in ['f0', 'f0_300', 'crepe-f0', 'energy', 'intensity', 'intensity_parselmouth']:
                         while frame_length-1 < iter_df.iloc[-1, -1]:
                             iter_df = iter_df.iloc[:-1]
                     else:
@@ -189,7 +250,7 @@ def get_neural_indices(annotation_dir, save_dir, wav_dir, accent_dir=None, binar
                 if last_index == frame_length:
                     iter_df.iloc[-1, -1].append(iter_df.iloc[-1, -1][-1] + 1)       
                 else:
-                    if annotation_dir.name not in ['f0', 'energy']:
+                    if annotation_dir.name not in ['f0', 'f0_300', 'crepe-f0', 'energy', 'intensity', 'intensity_parselmouth']:
                         iter_df.loc[iter_df.index[-1]+1] = {
                             'start': iter_df.iloc[-1, 1],
                             'end': librosa.get_duration(path=wav_dir / f"{file.stem}.wav"),
@@ -197,19 +258,19 @@ def get_neural_indices(annotation_dir, save_dir, wav_dir, accent_dir=None, binar
                             'file_id': file.stem,
                             'start_end_indices': list(range(iter_df.iloc[-1, -1][-1]+1, frame_length))
                             }
-                    else:
-                        iter_df.loc[iter_df.index[-1]+1] = {
-                            'start': iter_df.iloc[-1, 1],
-                            #'end': librosa.get_duration(path=wav_dir / f"{file.stem}.wav"),
-                            'label': 'sil',
-                            'file_id': file.stem,
-                            'start_end_indices': iter_df.iloc[-1, -1][-1]+1
-                            } 
+                    #else:
+                    #    iter_df.loc[iter_df.index[-1]+1] = {
+                    #        'start': iter_df.iloc[-1, 1],
+                    #        #'end': librosa.get_duration(path=wav_dir / f"{file.stem}.wav"),
+                    #        'label': 'sil',
+                    #        'file_id': file.stem,
+                    #        'start_end_indices': iter_df.iloc[-1, -1][-1]+1
+                    #        } 
                     
         # and at the beginning
         # We don't care if the regression tasks start at 1
         # or at 0 index, it's okay to throw one away.
-        if annotation_dir.name in ['f0', 'energy']:
+        if annotation_dir.name in ['f0', 'f0_300', 'crepe-f0', 'energy', 'intensity', 'intensity_parselmouth']:
             first_index = iter_df.iloc[0, -1]
         else:
             try:
@@ -224,7 +285,7 @@ def get_neural_indices(annotation_dir, save_dir, wav_dir, accent_dir=None, binar
                     'file_id': file.stem, 'start_end_indices': list(range(0, iter_df.iloc[0, -1][0]))
                     }), iter_df])
             
-        if annotation_dir.name not in ['f0', 'energy']:
+        if annotation_dir.name not in ['f0', 'f0_300', 'crepe-f0', 'energy', 'intensity', 'intensity_parselmouth']:
                 
             try:
                 if iter_df.iloc[-1, -1][-1] != frame_length -1:
@@ -245,34 +306,41 @@ def get_neural_indices(annotation_dir, save_dir, wav_dir, accent_dir=None, binar
         experiment_df = pd.concat([experiment_df, iter_df])
     accent_labels = '_accents' if accent_dir else ''
     binary_accent = '' if binary_accent else '_multiaccent'
+    monosyllables = '' if not remove_monosyllabic else '_polysyllabic'
     annotation_domain = 'stress' if (annotation_dir.stem == 'syllables') and (accent_dir == None) else annotation_dir.stem 
-    experiment_df.to_csv(save_dir/f'{annotation_domain}{accent_labels}{binary_accent}.csv', index=False,  float_format='%.3f')   
+    experiment_df.to_csv(save_dir/f'{annotation_domain}{accent_labels}{binary_accent}{monosyllables}.csv', index=False,  float_format='%.3f')   
     shutil.rmtree(tmp_dir)
         
 def create_task_datasets(task_set, save_dir, include=None):
     
     for key, (feat_dir_value, accent_dir_value, wav_dir_value) in task_set.items():
+        
+        if key.split('_')[-1] == 'polysyllabic':
+            remove_monosyllabic = True
+        else:
+            remove_monosyllabic = False
+            
         if include is None:      
             has_accent = 'with' if accent_dir_value is not None else 'without'
             print(f'Creating task for {feat_dir_value.stem} {has_accent} accent values...')
             if accent_dir_value is not None:
                 for binary_accent in [True, False]:
-                    get_neural_indices(feat_dir_value, save_dir, wav_dir_value, accent_dir=accent_dir_value, binary_accent=binary_accent)
+                    get_neural_indices(feat_dir_value, save_dir, wav_dir_value, remove_monosyllabic=remove_monosyllabic, accent_dir=accent_dir_value, binary_accent=binary_accent)
             else:
-                get_neural_indices(feat_dir_value, save_dir, wav_dir_value, accent_dir=accent_dir_value)
+                get_neural_indices(feat_dir_value, save_dir, wav_dir_value, accent_dir=accent_dir_value, remove_monosyllabic=remove_monosyllabic)
         else:
             if key in include:
                 has_accent = 'with' if accent_dir_value is not None else 'without'
                 print(f'Creating task for {feat_dir_value.stem} {has_accent} accent values...')
                 if accent_dir_value is not None:
                     for binary_accent in [True, False]:
-                        get_neural_indices(feat_dir_value, save_dir, wav_dir_value, accent_dir=accent_dir_value, binary_accent=binary_accent)
+                        get_neural_indices(feat_dir_value, save_dir, wav_dir_value, remove_monosyllabic=remove_monosyllabic, accent_dir=accent_dir_value, binary_accent=binary_accent)
                 else:
-                    get_neural_indices(feat_dir_value, save_dir, wav_dir_value, accent_dir=accent_dir_value) 
+                    get_neural_indices(feat_dir_value, save_dir, wav_dir_value, remove_monosyllabic=remove_monosyllabic, accent_dir=accent_dir_value) 
 
 
 if __name__ == '__main__':
-    include = ['f0']
+    include = ['tone_rhymes']
     for corpus, task_set in TASK_SET.items():
         save_dir = Path(f'data/{corpus}/aligned_tasks')
         os.makedirs(save_dir, exist_ok=True)

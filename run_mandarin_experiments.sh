@@ -62,7 +62,7 @@ if [ $stage -le 1 ]; then
         fi
     for corpus in $CORPORA; do
         if [ $corpus == 'mandarin-timit' ]; then #&& [ [ $model == 'wav2vec2-large' ] || [ $model == 'wav2vec2-xls-r-300m' ] ]; then
-            FEATURES="tone energy f0"
+            FEATURES="energy f0"
         
         elif [ $corpus == 'switchboard' ]; then
             FEATURES="syllables_accents stress energy f0"
@@ -70,7 +70,7 @@ if [ $stage -le 1 ]; then
         fi
         for feature in $FEATURES; do
           echo "Processing $feature from $model for $corpus"
-
+          for l in $(seq 0 12 1); do
           echo "$0: Running classification experiments..."
 
           echo "Probing $model with $probe for $layer layers" >> logs/${model}_${feature}.stdout
@@ -79,6 +79,7 @@ if [ $stage -le 1 ]; then
                   >> logs/${model}_${feature}_${corpus}_${probe}.stdout \
                   2>> logs/${model}_${feature}_${corpus}_${probe}.stderr &
     	  wait
+        done
     	  done
     done
     done

@@ -124,7 +124,7 @@ def main():
         #Path(f'data/switchboard/phones'),
         Path(f'data/switchboard/phonwords'),
         Path(f'data/switchboard/syllables'),
-        Path('data/switchboard/accent'),
+        Path('data/switchboard/accents'),
         Path(f'logs_01-29-2024/switchboard/syllables_accents/wav2vec2-base/linear/layer_9.csv'),  
     ],
     'switchboard_stress':
@@ -137,17 +137,18 @@ def main():
     }
     
     for corpus, annotation_list in annotation_dict.items():
-        if (corpus == 'mandarin-timit') or (corpus == 'switchboard'):
+        print(corpus)
+        if corpus != 'switchboard':
             continue
         if corpus == 'switchboard_stress':
             corpus_name = 'switchboard'
         else:
-            corpus_name == corpus
+            corpus_name = corpus
         # print(corpus)
         save_dir = Path(f'analysis/inspection/{corpus}/{annotation_list[-1].stem}')#{result_feature}_{result_layer}_{result_probe}/'
         os.makedirs(save_dir, exist_ok=True)
-        ls = pd.read_csv(annotation_list[-1]).file_id.unique()
-        #ls = [file.stem for file in list(Path(f'data/{corpus}/accent').glob('*.csv'))]
+        #ls = pd.read_csv(annotation_list[-1]).file_id.unique()
+        ls = [file.stem for file in list(Path(f'data/{corpus}/accent').glob('*.csv'))]
         for file in tqdm(list(Path(f'data/{corpus_name}/wav').glob('*.wav'))):
             if file.stem in ls:
                 generation_success = generate_textgrid(file, annotation_list, save_dir)

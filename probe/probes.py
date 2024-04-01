@@ -51,7 +51,7 @@ class LogisticRegressor(torch.nn.Module):
 class MLPClassifier(torch.nn.Module):
     def __init__(self, in_dim, out_dim, hidden_dim) -> None:
         super(MLPClassifier, self).__init__()
-        self.mlp_logits = torch.nn.Sequential(
+        self.logits = torch.nn.Sequential(
             torch.nn.Linear(in_dim, hidden_dim),
             torch.nn.ReLU(),
             torch.nn.Dropout(),
@@ -59,7 +59,7 @@ class MLPClassifier(torch.nn.Module):
             )
         
     def forward(self, x):
-        output = self.mlp_logits(x)
+        output = self.logits(x)
         return output
 
 
