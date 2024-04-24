@@ -71,7 +71,8 @@ def get_phone_type(phone):
         'ey', 'aw', 'iy', 'uh', 'en', 'el', 'oy']
     silence = ['SIL', 'sil']
 
-    consonants = [lab for lab in df.label_x.unique() if (lab not in vowels and lab not in silence)]
+    consonants = ['b','t', 'dh', 'n', 'd', 'l', 's', 'k', 'r', 'th',
+                  'ng', 'w', 'hh', 'm', 'z', 'p', 'g', 'ch', 'jh', 'sh', 'lg','zh']
     if phone in vowels:
         return 'V'
     elif phone in consonants:
@@ -80,9 +81,9 @@ def get_phone_type(phone):
         return 'sil'     
 
 
-def filter_syllable(data, feature, is_onset):
+def filter_syllable(data, feature, is_onset=True):
     
-    """UNTESTED FUNCTION: Filters out onsets or rhymes of syllables."""
+    """Filters out onsets or rhymes of syllables."""
     
     if not feature.startswith('tone'):
         
@@ -90,30 +91,34 @@ def filter_syllable(data, feature, is_onset):
         
         phone_reference['phone_type'] = phone_reference.label.map(get_phone_type)
         phone_reference['phone_number'] = phone_reference.phone_type.map(lambda x: 1 if x == 'V' else 0)
-        phone_reference['onset_number'] = phone_reference.groupby(['syl_sort']).phone_number.cumsum()
-        phone_reference['is_onset'] = phone_reference.onset_number.map(lambda x: True if x == 0 else False)
-        
-        phone_reference = phone_reference[['label', 'file_id', 'start_end_indices']]
+        phone_reference['start_end_indices'] = phone_reference.start_end_indices.map(literal_eval)
         
         data['syllable_id'] = data.index.to_list()
-        
+        data['start_end_indices'] = data.start_end_indices.map(literal_eval)
         data_exploded = data.explode('start_end_indices')
         phone_exploded = phone_reference.explode('start_end_indices')
         
-        merged_data = data_exploded.merge(phone_exploded, how='inner', on=['file_id', 'start_end_indices'])
+        merged_data = phone_exploded.merge(data_exploded, how='inner', on=['file_id', 'start_end_indices'])
         
-        imploded_data = merged_data.groupby(['start', 'end', 'file_id', 'is_onset']).agg({'start_end_indices': lambda x: x.to_list()})
+        merged_data['onset_number'] = merged_data.groupby(['syllable_id']).phone_number.cumsum()
+        merged_data['is_onset'] = merged_data.onset_number.map(lambda x: True if x == 0 else False)
+
+        imploded_data = merged_data.groupby(['file_id', 'syllable_id', 'is_onset', 'label_x']).agg(
+            {
+                'start_end_indices': lambda x: x,
+                'label_y': lambda y: y.unique()[0] if len(y.unique()) == 1 else x
+                }).reset_index().sort_values(by='syllable_id')
         
         final_data = imploded_data[['start', 'end', 'file_id', 'start_end_indices', 'is_onset']].loc[imploded_data.is_onset == is_onset]
         
         
     else:
-        df = pd.read_csv('data/mandarin-timit/aligned_task/tone_rhymes.csv')
+        df = pd.read_csv('data/mandarin-timit/aligned_tasks/tone_rhymes.csv')
         if is_onset == False:
-            final_data = df.loc[df.label != 0]
+            final_data = df.loc[df.label != '0']
         
         else:
-            final_data = data.loc[df.label == 0]
+            final_data = data.loc[df.label == '0']
     
     return final_data                 
 
@@ -498,6 +503,10 @@ def main():
     parser.add_argument(
         '--random_seed', type=int, default=42, help='Random seed for reproducibility'
     )
+    parser.add_argument(
+        '--onset_filtering', type=str, default='all', help="Select whether to use 'all' (the entire syllable),"\
+        "'onset' (onsets only) or 'rhyme' syllable rhymes only"
+    )
     
     args = parser.parse_args()
     
@@ -523,6 +532,12 @@ def main():
     os.makedirs(log_path, exist_ok=True)
     
     csv_data = pd.read_csv(args.labels)
+    if args.onset_filtering != 'all':
+        if args.onset_filtering == 'onset':
+            csv_data = filter_syllable(csv_data, args.task, is_onset=True)
+        else:
+            csv_data = filter_syllable(csv_data, args.task, is_onset=False) 
+            
     if args.task.startswith('stress'):
         stress_category_mapping = {'p': 1, 'n': 0, 's': 0}
         csv_data['label'] = csv_data.label.map(lambda x: stress_category_mapping.get(x, 'SIL'))
@@ -539,6 +554,9 @@ def main():
         csv_data['speaker'] = csv_data.file_id.map(lambda x: x.split('_')[0])
     if (args.task.endswith('f0')) and (args.task != 'tone') and (args.task != 'energy'):
         csv_data = csv_data.loc[(csv_data.label != 'sil') & (csv_data.label != 'SIL')]
+    elif args.task == 'stress':
+        csv_data = csv_data.loc[(csv_data.label != 'sil') & (csv_data.label != 'SIL')]
+
     else:
         csv_data = csv_data.loc[(csv_data.label != 0)&(csv_data.label != 'sil')& (csv_data.label != 'SIL')&(csv_data.label.notna())]
 
