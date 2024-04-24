@@ -63,7 +63,59 @@ def balance_classes(data, col_name='label', random_state=None):
     
     group = data.groupby(col_name)
     return group.apply(lambda x: x.sample(group.size().min(), random_seed=random_state).reset_index(drop=True)).reset_index(drop=True)
-            
+
+
+def get_phone_type(phone):
+    vowels = ['ah', 'y', 'ow',  'aa',  'ae', 'ih', 'ay', 
+       'eh', 'ao', 'ax',  'uw', 'v', 'f', 'er', 'ga',
+        'ey', 'aw', 'iy', 'uh', 'en', 'el', 'oy']
+    silence = ['SIL', 'sil']
+
+    consonants = [lab for lab in df.label_x.unique() if (lab not in vowels and lab not in silence)]
+    if phone in vowels:
+        return 'V'
+    elif phone in consonants:
+        return 'C'
+    else:
+        return 'sil'     
+
+
+def filter_syllable(data, feature, is_onset):
+    
+    """UNTESTED FUNCTION: Filters out onsets or rhymes of syllables."""
+    
+    if not feature.startswith('tone'):
+        
+        phone_reference = pd.read_csv('data/switchboard/aligned_tasks/phones.csv')
+        
+        phone_reference['phone_type'] = phone_reference.label.map(get_phone_type)
+        phone_reference['phone_number'] = phone_reference.phone_type.map(lambda x: 1 if x == 'V' else 0)
+        phone_reference['onset_number'] = phone_reference.groupby(['syl_sort']).phone_number.cumsum()
+        phone_reference['is_onset'] = phone_reference.onset_number.map(lambda x: True if x == 0 else False)
+        
+        phone_reference = phone_reference[['label', 'file_id', 'start_end_indices']]
+        
+        data['syllable_id'] = data.index.to_list()
+        
+        data_exploded = data.explode('start_end_indices')
+        phone_exploded = phone_reference.explode('start_end_indices')
+        
+        merged_data = data_exploded.merge(phone_exploded, how='inner', on=['file_id', 'start_end_indices'])
+        
+        imploded_data = merged_data.groupby(['start', 'end', 'file_id', 'is_onset']).agg({'start_end_indices': lambda x: x.to_list()})
+        
+        final_data = imploded_data[['start', 'end', 'file_id', 'start_end_indices', 'is_onset']].loc[imploded_data.is_onset == is_onset]
+        
+        
+    else:
+        df = pd.read_csv('data/mandarin-timit/aligned_task/tone_rhymes.csv')
+        if is_onset == False:
+            final_data = df.loc[df.label != 0]
+        
+        else:
+            final_data = data.loc[df.label == 0]
+    
+    return final_data                 
 
 
 def get_full_dataset(
@@ -517,9 +569,9 @@ def main():
     best_params=False
     ####################      
     
-    full_train_speakers, test_speakers = train_test_split(csv_data.speaker.unique(), test_size=0.2, random_state=seed) #stratify='file_id', but I want to split file ids
+    full_train_speakers, test_speakers = train_test_split(csv_data.speaker.sort_values().unique(), test_size=0.2, random_state=seed) #stratify='file_id', but I want to split file ids
     if validation_split:
-        train_speakers, dev_speakers = train_test_split(full_train_speakers.speaker.unique(), test_size=0.2, random_state=seed)
+        train_speakers, dev_speakers = train_test_split(full_train_speakers.speaker.sort_values().unique(), test_size=0.2, random_state=seed)
         dev = csv_data.loc[csv_data.speaker.isin(dev_speakers)]
 
     
