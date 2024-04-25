@@ -22,7 +22,18 @@ def convert2wav(
     print(iterator)
     print(f'Converting {corpus_name} to wav...')
     for file in tqdm(iterator):
-        if file.stem in accent_file_ids:
+        if corpus_name == 'switchboard':
+            if file.stem in accent_file_ids:
+                new_file = save_dir / file.name
+                
+                command = [
+                    'ffmpeg',
+                    '-i',
+                    file,
+                    new_file.with_suffix('.wav')           
+                ]
+                subprocess.call(command)
+        else:
             new_file = save_dir / file.name
             
             command = [
@@ -78,7 +89,7 @@ def resample_audio(audio_dir, save_dir, original_rate=8000, target_rate=16000):
 
 def process_switchboard_audio():
     
-    corpora = ['switchboard']
+    corpora = ['mandarin-timit']#,'switchboard']
     resample_corpora = {'switchboard': 8000}
     
     corpus_args = {
@@ -88,6 +99,14 @@ def process_switchboard_audio():
                         True,
                         Path('corpora/nxt_switchboard_ann/split_wav'),
                         Path('corpora/nxt_switchboard_ann/wav')
+        ),
+        'mandarin-timit': (
+            'flac',
+            Path('corpora/global_timit_cmn/data/flac'),
+            Path('corpora/global_timit_cmn/data/wav'),
+            False,
+            None,
+            None
         )
     }
    

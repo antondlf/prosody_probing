@@ -98,7 +98,6 @@ def all_backchannel(root_directory, file_path):
 
 def adjust_annotations(start, end, audio_id, turn_id, annotation_dir, save_dir,feat_mapping=feat_labels):
     
-    
     for feat in os.listdir(annotation_dir):
         os.makedirs(Path(save_dir, feat), exist_ok=True)
         annotation_file = pd.read_csv(Path(annotation_dir, feat, audio_id).with_suffix('.csv'))
@@ -114,9 +113,15 @@ def adjust_annotations(start, end, audio_id, turn_id, annotation_dir, save_dir,f
         else:
             # the case of phones
             chunk['label'] = [1] * len(chunk)
-    
         
-        chunk.to_csv(Path(save_dir, feat, turn_id).with_suffix('.csv'))
+#        if chunk.loc[chunk.index(0), 'start'] > 0:
+#            chunk = pd.concat([
+#                pd.DataFrame({'start': 0, 'end': chunk.loc[0, 'start'], 'label': 'SIL'}),
+#                chunk
+#            ])
+         
+        turn_filename_csv = turn_id + '.csv'
+        chunk.to_csv(Path(save_dir, feat, turn_filename_csv))
 
 
 def split_wav(audio_id, audio_dir, save_dir, feat_mapping=feat_labels):

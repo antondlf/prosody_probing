@@ -1,10 +1,12 @@
 """some functions adapted from https://github.com/Bartelds/pae_probe_experiments/blob/master/bin/gen_wav2vec_feats_hf.py"""
 from transformers.models.wav2vec2 import Wav2Vec2Model
+from transformers.models.hubert import HubertModel
+from transformers.models.wavlm import WavLMModel
 import soundfile as sf
 import librosa
 import torch
 import numpy as np
-from acoustic_feats import get_f0, get_energy
+from acoustic_feats import get_f0, get_energy, get_fbank, get_mfcc, get_pitch_energy, get_pitch_parselmouth
 from transformers import logging
 from pathlib import Path
 from argparse import ArgumentParser
@@ -13,17 +15,45 @@ import os
 
 
 MODEL_PATH_PREPEND = {
-    'wav2vec2-large-960h': 'facebook',
+    'wav2vec2-large': 'facebook',
     'wav2vec2-large-robust': 'facebook',
     'wav2vec2-large-xlsr-53': 'facebook',
     'wav2vec2-xls-r-300m': 'facebook',
     'mandarin-wav2vec2': 'kehanlu',
     'wav2vec2-base': 'facebook',
-    'mms-300m': 'facebook'
+    'mms-300m': 'facebook',
+    'mandarin-wav2vec2-aishell1': 'kehanlu',
+    'wav2vec2-base-100h': 'facebook',
+    'wav2vec2-large-xlsr-53-chinese-zh-cn': 'jonatasgrosman',
+    'wav2vec2-large-960h': 'facebook',
+    'hubert-base-ls960': 'facebook',
+    'hubert-large': 'facebook',
+    'wavlm-base': 'microsoft',
+    'wavlm-large': 'microsoft'
+}
+
+MODEL_EXTRACTOR_CLASS = {
+    
+    'wav2vec2-large': Wav2Vec2Model,
+    'wav2vec2-large-robust': Wav2Vec2Model,
+    'wav2vec2-large-xlsr-53': Wav2Vec2Model,
+    'wav2vec2-xls-r-300m': Wav2Vec2Model,
+    'mandarin-wav2vec2': Wav2Vec2Model,
+    'wav2vec2-base': Wav2Vec2Model,
+    'mms-300m': Wav2Vec2Model,
+    'mandarin-wav2vec2-aishell1': Wav2Vec2Model,
+    'wav2vec2-base-100h': Wav2Vec2Model,
+    'wav2vec2-large-xlsr-53-chinese-zh-cn':Wav2Vec2Model,
+    'wav2vec2-large-960h': Wav2Vec2Model,
+    'hubert-base-ls960': HubertModel,
+    'hubert-large-ls960': HubertModel, 
+    'wavlm-base': WavLMModel,
+    'wavlm-large': WavLMModel,
 }
 
 def get_feature_func(model_or_feat, layer=None):
     
+    print(model_or_feat)
     if model_or_feat in MODEL_PATH_PREPEND.keys():
         
         model_name = MODEL_PATH_PREPEND.get(model_or_feat, 'facebook') + '/' + model_or_feat
@@ -32,7 +62,8 @@ def get_feature_func(model_or_feat, layer=None):
         if layer is not None:
             model_kwargs["num_hidden_layers"] = layer if layer > 0 else 0
             
-        model = Wav2Vec2Model.from_pretrained(model_name, **model_kwargs)
+        extractor_class = MODEL_EXTRACTOR_CLASS.get(model_or_feat, Wav2Vec2Model)
+        model = extractor_class.from_pretrained(model_name, **model_kwargs)
         
         model.eval()
         if torch.cuda.is_available():
@@ -67,16 +98,17 @@ def get_feature_func(model_or_feat, layer=None):
         return _featurize 
     
     else:
-        if model_or_feat == 'f0':
-            pass
-        elif model_or_feat == 'rms':
-            pass
+        if model_or_feat == 'pitch':
+            return get_f0 #get_pitch_parselmouth
+
+        elif model_or_feat == 'energy':
+            return get_energy
         elif model_or_feat == 'pitch-energy':
-            pass
+            return get_pitch_energy
         elif model_or_feat == 'fbank':
-            pass
+            return get_fbank
         elif model_or_feat == 'mfcc':
-            pass
+            return get_mfcc
 
 
 def main():
@@ -103,7 +135,7 @@ def main():
     args = parser.parse_args()
     
     wav_path = args.wavepath
-    layer = int(args.layer) if (args.layer != 'all') or (args.layer != 'None') else args.layer
+    layer = int(args.layer) if (args.layer != 'all') and (args.layer != 'None') else args.layer
     feat_save = args.s / args.c
     os.makedirs(feat_save, exist_ok=True)
     
@@ -113,8 +145,26 @@ def main():
         featurizer = get_feature_func(args.model, layer=layer)
         
     for file in tqdm(list(wav_path.glob('*.wav'))):
-        file_save = feat_save / f'layer-{str(layer)}' / f'{file.stem}.npy'
-        np.save(file_save, featurizer(file))
+        if layer != 'None':
+            if args.model in ['fbank', 'mfcc', 'pitch_energy', 'pitch', 'energy']:
+                file_save = feat_save / args.model / f'layer-{0}' / f'{file.stem}.npy'
+                os.makedirs(file_save.parent, exist_ok=True)
+                if not file_save.exists():
+                    np.save(file_save, featurizer(file))
+            else:
+                file_save = feat_save / args.model / f'layer-{str(layer)}' / f'{file.stem}.npy'
+                os.makedirs(file_save.parent, exist_ok=True)
+                if not file_save.exists():
+                    np.save(file_save, featurizer(file))
+        else:
+            hidden_states = featurizer(file)
+            for i, state in enumerate(hidden_states):
+                file_save = feat_save / args.model / f'layer-{str(i)}' / f'{file.stem}.npy'
+                os.makedirs(file_save.parent, exist_ok=True)
+                if not file_save.exists():
+                    np.save(file_save, state) 
+                
+                
         
 if __name__ == '__main__':
     main()
