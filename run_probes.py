@@ -110,7 +110,7 @@ def filter_syllable(data, feature, is_onset=True):
                 }).reset_index().sort_values(by='syllable_id')
         
         final_data = imploded_data[['file_id', 'start_end_indices', 'is_onset', 'label_y']].loc[imploded_data.is_onset == is_onset]
-        final_data.columns = ['file_id', 'start_end_indices', 'is_onset', 'label']  
+        final_data.columns = ['file_id', 'start_end_indices', 'is_onset', 'label'] 
         
     else:
         df = pd.read_csv('data/mandarin-timit/aligned_tasks/tone_rhymes.csv')
@@ -539,8 +539,10 @@ def main():
     csv_data = pd.read_csv(args.labels)
     if args.onset_filtering != 'all':
         if args.onset_filtering == 'onset':
+            test_set_raw = csv_data.copy()
             csv_data = filter_syllable(csv_data, args.task, is_onset=True)
         else:
+            test_set_raw = csv_data.copy()
             csv_data = filter_syllable(csv_data, args.task, is_onset=False) 
             
     if args.task.startswith('stress'):
@@ -600,7 +602,10 @@ def main():
         dev = None
     
     train = csv_data.loc[csv_data.speaker.isin(full_train_speakers)]
-    test = csv_data.loc[csv_data.speaker.isin(test_speakers)]
+    try:
+        test = test_set_raw.loc[csv_data.speaker.isin(test_speakers)]
+    except NameError:
+        test = csv_data.loc[csv_data.speaker.isin(test_speakers)]
 
     neural_dim = args.neural_dim
     
