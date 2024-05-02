@@ -115,10 +115,11 @@ def filter_syllable(data, feature, is_onset=True):
     else:
         df = pd.read_csv('data/mandarin-timit/aligned_tasks/tone_rhymes.csv')
         if is_onset == False:
-            final_data = df.loc[df.label != '0']
-        
+            final_data = data.loc[df.label != '0']
+            final_data['start_end_indices'] = final_data.start_end_indices.map(literal_eval)     
         else:
             final_data = data.loc[df.label == '0']
+            final_data['start_end_indices'] = final_data.start_end_indices.map(literal_eval)
     
     return final_data                 
 
@@ -382,7 +383,7 @@ def train_regression(train_data, log_dir, validation=False, cross_validation=Tru
     return linear_model
 
 
-def train_logistic_classifier(train_data, log_dir, binary=False, cross_validation=True, best_params=True, validation=False, tune_params=False):
+def train_logistic_classifier(train_data, log_dir, binary=False, cross_validation=False, best_params=True, validation=False, tune_params=False):
     
     X, y = train_data
     
@@ -528,6 +529,8 @@ def main():
         log_path = Path(f"logs/mean/{args.corpus_name}/{args.task}/{args.model}/{args.probe}") 
     elif balance_classes:
         log_path = Path(f"logs/balanced/{args.corpus_name}/{args.task}/{args.model}/{args.probe}")
+    elif args.onset_filtering != 'all':
+        log_path = Path(f"logs/{args.corpus_name}/{args.task}_{args.onset_filtering}/{args.model}/{args.probe}")
     else:
         #train_test_split
         log_path = Path(f"logs/{args.corpus_name}/{args.task}/{args.model}/{args.probe}")
@@ -597,7 +600,6 @@ def main():
         dev = csv_data.loc[csv_data.speaker.isin(dev_speakers)]
     else:
         dev = None
-
     
     train = csv_data.loc[csv_data.speaker.isin(full_train_speakers)]
     try:
