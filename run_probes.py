@@ -106,19 +106,20 @@ def filter_syllable(data, feature, is_onset=True):
         imploded_data = merged_data.groupby(['file_id', 'syllable_id', 'is_onset', 'label_x']).agg(
             {
                 'start_end_indices': lambda x: x,
-                'label_y': lambda y: y.unique()[0] if len(y.unique()) == 1 else x
+                'label_y': lambda y: y.unique()[0] if len(y.unique()) == 1 else y
                 }).reset_index().sort_values(by='syllable_id')
         
-        final_data = imploded_data[['start', 'end', 'file_id', 'start_end_indices', 'is_onset']].loc[imploded_data.is_onset == is_onset]
-        
+        final_data = imploded_data[['file_id', 'start_end_indices', 'is_onset', 'label_y']].loc[imploded_data.is_onset == is_onset]
+        final_data.columns = ['file_id', 'start_end_indices', 'is_onset', 'label']  
         
     else:
         df = pd.read_csv('data/mandarin-timit/aligned_tasks/tone_rhymes.csv')
         if is_onset == False:
-            final_data = df.loc[df.label != '0']
-        
+            final_data = data.loc[df.label != '0']
+            final_data['start_end_indices'] = final_data.start_end_indices.map(literal_eval)     
         else:
             final_data = data.loc[df.label == '0']
+            final_data['start_end_indices'] = final_data.start_end_indices.map(literal_eval)
     
     return final_data                 
 
@@ -146,8 +147,10 @@ def get_full_dataset(
         raw_feats = np.load(root_dir / feat_file) if not is_random else np.zeros((int(group.start.iloc[-1] / 0.02 + 30), 1))
         feat_dim = raw_feats.shape[-1]
         group.dropna(inplace=True)
-        if group.start_end_indices.dtype != np.float64:
+        if group.start_end_indices.dtype == str:
             group['start_end_indices'] = group.start_end_indices.map(literal_eval)
+        elif group.start_end_indices.dtype == object:
+            group['start_end_indices'] = group.start_end_indices.map(lambda x: list(x) if type(x) != int else [x])
         group['label'] = group.label.astype(np.float32)
         if group.start_end_indices.dtype == list:
             group = group.loc[group.start_end_indices.map(lambda x: len(x) > 0)]
@@ -380,7 +383,7 @@ def train_regression(train_data, log_dir, validation=False, cross_validation=Tru
     return linear_model
 
 
-def train_logistic_classifier(train_data, log_dir, binary=False, cross_validation=True, best_params=True, validation=False, tune_params=False):
+def train_logistic_classifier(train_data, log_dir, binary=False, cross_validation=False, best_params=True, validation=False, tune_params=False):
     
     X, y = train_data
     
@@ -526,6 +529,8 @@ def main():
         log_path = Path(f"logs/mean/{args.corpus_name}/{args.task}/{args.model}/{args.probe}") 
     elif balance_classes:
         log_path = Path(f"logs/balanced/{args.corpus_name}/{args.task}/{args.model}/{args.probe}")
+    elif args.onset_filtering != 'all':
+        log_path = Path(f"logs/{args.corpus_name}/{args.task}_{args.onset_filtering}/{args.model}/{args.probe}")
     else:
         #train_test_split
         log_path = Path(f"logs/{args.corpus_name}/{args.task}/{args.model}/{args.probe}")
@@ -591,7 +596,8 @@ def main():
     if validation_split:
         train_speakers, dev_speakers = train_test_split(full_train_speakers.speaker.sort_values().unique(), test_size=0.2, random_state=seed)
         dev = csv_data.loc[csv_data.speaker.isin(dev_speakers)]
-
+    else:
+        dev = None
     
     train = csv_data.loc[csv_data.speaker.isin(full_train_speakers)]
     test = csv_data.loc[csv_data.speaker.isin(test_speakers)]
