@@ -8,10 +8,11 @@ echo $current_path
 DATA_DIR="$current_path/../../data/"
 FEATS_DIR="$DATA_DIR/feats/"
 #MODEL_NAMES="wav2vec2-large-robust"
-MODEL_NAMES="wav2vec2-base mandarin-wav2vec2 wav2vec2-base-100h mandarin-wav2vec2-aishell1 fbank mfcc pitch energy pitch_energy"
+MODEL_NAMES="mandarin-wav2vec2" #wav2vec2-base-100h mandarin-wav2vec2-aishell1 fbank mfcc pitch energy pitch_energy"
 LAYER="all"
 PROBES=$2
-CORPORA="bu_radio" #"mandarin-timit switchboard"
+ONSET_TYPE="onset rhyme"
+CORPORA="mandarin-timit" #switchboard"
 FEATURES="stress syllables_accents energy f0"
 ##############################################################################
 # Configuration
@@ -61,27 +62,29 @@ if [ $stage -le 1 ]; then
         fi
     for corpus in $CORPORA; do
         if [ $corpus == 'mandarin-timit' ]; then #&& [ [ $model == 'wav2vec2-large' ] || [ $model == 'wav2vec2-xls-r-300m' ] ]; then
-            FEATURES="tone energy f0"
+            FEATURES="tone" #energy f0"
         
         elif [ $corpus == 'switchboard' ]; then
-            FEATURES="stress syllables_accents energy f0"
+            FEATURES="stress syllables_accents" # energy f0"
 
         elif [ $corpus == 'bu_radio' ]; then
             FEATURES="phones_accents energy f0"
 
         fi
         for feature in $FEATURES; do
-          echo "Processing $feature from $model for $corpus"
+         for onset_status in $ONSET_TYPE; do
+	      	echo "Processing $feature from $model for $corpus with only $onset_status"
 
           echo "$0: Running classification experiments..."
         for l in $(seq 0 1 12); do
-          echo "Probing $model with $probe for layer $layer" >> logs/${model}_${feature}.stdout
+          echo "Probing $model with only $onset_status with $probe for layer $layer" >> logs/${model}_${feature}.stdout
               python3 run_probes.py $model $l -l data/$corpus/aligned_tasks/${feature}.csv \
-             -d data/feats/$corpus -c $corpus -t $feature -r True -p $probe #--gpu_count #$gpu #$3
+             -d data/feats/$corpus -c $corpus -t $feature -r True -p $probe --onset_filtering "$onset_status" #--gpu_count #$gpu #$3
                   >> logs/${model}_${feature}_${corpus}_${probe}.stdout \
                   2>> logs/${model}_${feature}_${corpus}_${probe}.stderr &
     	  wait
         done
+done
     	  done
     done
     done
