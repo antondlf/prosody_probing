@@ -109,8 +109,8 @@ def filter_syllable(data, feature, is_onset=True):
                 'label_y': lambda y: y.unique()[0] if len(y.unique()) == 1 else y
                 }).reset_index().sort_values(by='syllable_id')
         
-        final_data = imploded_data[['file_id', 'start_end_indices', 'is_onset', 'label_y']].loc[imploded_data.is_onset == is_onset]
-        final_data.columns = ['file_id', 'start_end_indices', 'is_onset', 'label'] 
+        final_data = imploded_data[['file_id', 'speaker', 'start_end_indices', 'is_onset', 'label_y']].loc[imploded_data.is_onset == is_onset]
+        final_data.columns = ['file_id', 'speaker', 'start_end_indices', 'is_onset', 'label'] 
         
     else:
         df = pd.read_csv('data/mandarin-timit/aligned_tasks/tone_rhymes.csv')
@@ -537,13 +537,6 @@ def main():
     os.makedirs(log_path, exist_ok=True)
     
     csv_data = pd.read_csv(args.labels)
-    if args.onset_filtering != 'all':
-        if args.onset_filtering == 'onset':
-            test_set_raw = csv_data.copy()
-            csv_data = filter_syllable(csv_data, args.task, is_onset=True)
-        else:
-            test_set_raw = csv_data.copy()
-            csv_data = filter_syllable(csv_data, args.task, is_onset=False) 
             
     if args.task.startswith('stress'):
         stress_category_mapping = {'p': 1, 'n': 0, 's': 0}
@@ -602,10 +595,13 @@ def main():
         dev = None
     
     train = csv_data.loc[csv_data.speaker.isin(full_train_speakers)]
-    try:
-        test = test_set_raw.loc[csv_data.speaker.isin(test_speakers)]
-    except NameError:
-        test = csv_data.loc[csv_data.speaker.isin(test_speakers)]
+    test = csv_data.loc[csv_data.speaker.isin(test_speakers)]
+    
+    if args.onset_filtering != 'all':
+        if args.onset_filtering == 'onset':
+            train = filter_syllable(train, args.task, is_onset=True)
+        else:
+            train = filter_syllable(train, args.task, is_onset=False) 
 
     neural_dim = args.neural_dim
     
