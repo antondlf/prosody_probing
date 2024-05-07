@@ -8,11 +8,11 @@ echo $current_path
 DATA_DIR="$current_path/../../data/"
 FEATS_DIR="$DATA_DIR/feats/"
 #MODEL_NAMES="wav2vec2-large-robust"
-MODEL_NAMES="mandarin-wav2vec2" #wav2vec2-base-100h mandarin-wav2vec2-aishell1 fbank mfcc pitch energy pitch_energy"
+MODEL_NAMES="wav2vec2-base mandarin-wav2vec2" #wav2vec2-base-100h mandarin-wav2vec2-aishell1 fbank mfcc pitch energy pitch_energy"
 LAYER="all"
 PROBES=$2
 ONSET_TYPE="onset rhyme"
-CORPORA="mandarin-timit" #switchboard"
+CORPORA="switchboard"
 FEATURES="stress syllables_accents energy f0"
 ##############################################################################
 # Configuration
@@ -65,7 +65,7 @@ if [ $stage -le 1 ]; then
             FEATURES="tone" #energy f0"
         
         elif [ $corpus == 'switchboard' ]; then
-            FEATURES="stress syllables_accents" # energy f0"
+            FEATURES="stress syllables_accents" #stress energy f0"
 
         elif [ $corpus == 'bu_radio' ]; then
             FEATURES="phones_accents energy f0"

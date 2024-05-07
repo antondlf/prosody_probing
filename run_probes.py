@@ -103,7 +103,7 @@ def filter_syllable(data, feature, is_onset=True):
         merged_data['onset_number'] = merged_data.groupby(['syllable_id']).phone_number.cumsum()
         merged_data['is_onset'] = merged_data.onset_number.map(lambda x: True if x == 0 else False)
 
-        imploded_data = merged_data.groupby(['file_id', 'syllable_id', 'is_onset', 'label_x']).agg(
+        imploded_data = merged_data.groupby(['file_id', 'speaker', 'syllable_id', 'is_onset', 'label_x']).agg(
             {
                 'start_end_indices': lambda x: x,
                 'label_y': lambda y: y.unique()[0] if len(y.unique()) == 1 else y
@@ -147,10 +147,15 @@ def get_full_dataset(
         raw_feats = np.load(root_dir / feat_file) if not is_random else np.zeros((int(group.start.iloc[-1] / 0.02 + 30), 1))
         feat_dim = raw_feats.shape[-1]
         group.dropna(inplace=True)
-        if group.start_end_indices.dtype == str:
+        if type(group.start_end_indices.iloc[0]) == str:
             group['start_end_indices'] = group.start_end_indices.map(literal_eval)
+            group['start_end_indices'] = group.start_end_indices.map(lambda x: list(x) if type(x) != int else [x])
+            group = group.loc[group.start_end_indices.map(lambda x: len(x) > 0)]
+
         elif group.start_end_indices.dtype == object:
             group['start_end_indices'] = group.start_end_indices.map(lambda x: list(x) if type(x) != int else [x])
+            group = group.loc[group.start_end_indices.map(lambda x: len(x) > 0)]
+
         group['label'] = group.label.astype(np.float32)
         if group.start_end_indices.dtype == list:
             group = group.loc[group.start_end_indices.map(lambda x: len(x) > 0)]
