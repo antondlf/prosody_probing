@@ -147,7 +147,7 @@ def get_full_dataset(
         raw_feats = np.load(root_dir / feat_file) if not is_random else np.zeros((int(group.start.iloc[-1] / 0.02 + 30), 1))
         feat_dim = raw_feats.shape[-1]
         group.dropna(inplace=True)
-        if group.start_end_indices.dtype == str:
+        if type(group.start_end_indices[0]) == str:
             group['start_end_indices'] = group.start_end_indices.map(literal_eval)
         elif group.start_end_indices.dtype == object:
             group['start_end_indices'] = group.start_end_indices.map(lambda x: list(x) if type(x) != int else [x])
